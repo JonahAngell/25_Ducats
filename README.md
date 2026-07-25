@@ -1,26 +1,28 @@
-# Personal Budget App v7 Stack Fix
+# 25 Ducats Mobile Redesign v9
 
-This package fixes the `Maximum call stack size exceeded` error that occurred when POST buttons were clicked.
+This package redesigns the app shell and major views for mobile-first use while keeping the existing Apps Script backend contract.
 
-## Root cause
+## What changed
 
-The v7 frontend tried to wrap `callPost` like this:
+- Replaced the desktop sidebar with a sticky mobile header and fixed bottom navigation.
+- Added a floating transfer shortcut button.
+- Reworked Buckets, Transactions, Transfers, and Bucket Admin alias displays into card-first mobile layouts.
+- Kept larger desktop tables available above desktop widths.
+- Kept the existing Budget Planner card layout and tightened it for mobile.
+- Split CSS into multiple files:
+  - `styles/base.css`
+  - `styles/components.css`
+  - `styles/mobile.css`
+- Left `app.js` as one file for compatibility, but appended mobile rendering overrides at the bottom.
 
-- save the current `callPost` into `ORIGINAL_CALL_POST_V7`
-- redeclare `callPost`
-- call `ORIGINAL_CALL_POST_V7` inside the redeclared `callPost`
-
-Because JavaScript function declarations are hoisted, `ORIGINAL_CALL_POST_V7` ended up pointing back to the redeclared wrapper instead of the original function. That caused infinite recursion whenever any POST button called `callPost`.
-
-## Fix
-
-The app now uses `rawCallPostV7` for the actual fetch request and `callPost` only wraps that helper for clearer error messages.
-
-## Files
+## Files to deploy
 
 - `index.html`
-- `styles.css`
 - `app.js`
-- `Code.gs`
+- `styles/base.css`
+- `styles/components.css`
+- `styles/mobile.css`
 
-Replace your existing frontend files with these files. The Apps Script file is included unchanged from the v7 package for convenience.
+## Backend
+
+No Apps Script redeployment is required for this package if your current POST actions are already working.

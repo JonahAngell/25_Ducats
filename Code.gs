@@ -42,10 +42,11 @@ const HEADERS = {
 function doGet(e) {
   try {
     const action = queryParam_(e, 'action') || 'health';
-    if (action === 'health') return json_({ ok: true, message: 'Budget API is running.', timestamp: now_() });
+    if (action === 'health') return json_({ ok: true, message: 'Budget API v7 route-debug 2026-07-25', supportedPostActions: ['bootstrap','createTransaction','createBucketTransfer','retireBucket','saveBudgetPlan','saveDetailedBudgetPlan'], timestamp: now_() });
+    if (action === 'actions') return json_({ ok: true, version: 'Budget API v7 route-debug 2026-07-25', supportedPostActions: ['bootstrap','createTransaction','createBucketTransfer','retireBucket','saveBudgetPlan','saveDetailedBudgetPlan'], timestamp: now_() });
     validateToken_(queryParam_(e, 'token'));
     if (action === 'bootstrap') return json_(bootstrap_());
-    return json_({ ok: false, error: 'Unknown GET action: ' + action });
+    return json_({ ok: false, error: 'Unknown GET action: ' + action, supportedGetActions: ['health','actions','bootstrap'] });
   } catch (error) {
     return error_(error);
   }

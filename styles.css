@@ -160,3 +160,51 @@ label { display:grid; gap:7px; color:var(--muted); font-weight:800; }
 .budget-action-buttons { display:flex; gap:6px; }
 .small-button { border:1px solid var(--line); background:white; border-radius:10px; padding:7px 9px; font-weight:800; color:var(--primary); }
 @media (max-width: 700px) { .budget-planner-toolbar { grid-template-columns:1fr; } }
+
+
+/* 25 Ducats responsive budget planner */
+.brand-mark { font-size: 1rem; letter-spacing: -0.04em; }
+.ducats-egg { margin-top: -12px; align-self:flex-start; width:34px; height:34px; border:1px solid var(--line); border-radius:999px; background:var(--panel-soft); color:var(--muted); font-weight:900; opacity:.55; transition:.2s ease; }
+.ducats-egg:hover { opacity:1; transform:rotate(-8deg) scale(1.04); color:var(--primary); background:var(--primary-soft); }
+.ducats-toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(10px); opacity:0; background:#101827; color:#fff; padding:13px 18px; border-radius:999px; box-shadow:var(--shadow); z-index:50; transition:.22s ease; max-width:min(680px, calc(100vw - 32px)); text-align:center; }
+.ducats-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+.budget-planner-layout { display:grid; grid-template-columns:260px minmax(0,1fr); gap:16px; align-items:start; }
+.budget-planner-help { background:var(--panel-soft); border:1px solid var(--line); border-radius:18px; padding:16px; position:sticky; top:24px; }
+.budget-planner-help h4 { margin:0 0 10px; }
+.budget-planner-help ul { padding-left:18px; margin:0; color:var(--muted); line-height:1.45; }
+.budget-card-list { display:grid; gap:12px; }
+.budget-line-card { background:#fff; border:1px solid var(--line); border-radius:18px; padding:14px; box-shadow:0 10px 26px rgba(28,43,70,.06); }
+.budget-line-card.is-subtotal, .budget-line-card.is-total { background:#f6f9ff; border-color:#bfd0ff; }
+.budget-line-card.is-income { background:#f0fdf6; }
+.budget-line-card.is-deduction { background:#fff7ed; }
+.budget-line-main { display:grid; grid-template-columns:80px 1.2fr 150px 150px 150px; gap:10px; align-items:end; }
+.budget-line-main label, .budget-line-advanced label { gap:5px; font-size:.76rem; }
+.budget-line-title { min-width:0; }
+.budget-line-title input { font-weight:800; }
+.budget-line-results { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:12px; }
+.budget-result-pill { background:var(--panel-soft); border:1px solid var(--line); border-radius:14px; padding:10px; }
+.budget-result-pill span { display:block; color:var(--muted); font-size:.72rem; font-weight:900; text-transform:uppercase; letter-spacing:.05em; }
+.budget-result-pill strong { display:block; margin-top:4px; font-size:1rem; }
+.budget-line-advanced { display:none; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-top:12px; padding-top:12px; border-top:1px dashed var(--line); }
+.budget-line-card.expanded .budget-line-advanced { display:grid; }
+.budget-line-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; margin-top:12px; }
+.budget-toggle-advanced { color:var(--primary); background:transparent; border:0; padding:8px 4px; font-weight:900; }
+.budget-card-button { border:1px solid var(--line); background:#fff; color:var(--primary); border-radius:12px; padding:8px 10px; font-weight:900; }
+.budget-card-button.danger { color:var(--danger); }
+.budget-variance-good { color:var(--success); }
+.budget-variance-bad { color:var(--danger); }
+@media (max-width: 1180px) {
+  .budget-planner-layout { grid-template-columns:1fr; }
+  .budget-planner-help { position:static; }
+  .budget-line-main { grid-template-columns:70px 1fr 140px 140px; }
+  .budget-line-main .budget-bucket-wrap { grid-column:3 / span 2; }
+}
+@media (max-width: 760px) {
+  .budget-builder-actions { width:100%; }
+  .budget-builder-actions > * { flex:1 1 100%; }
+  .budget-line-main, .budget-line-advanced, .budget-line-card.expanded .budget-line-advanced { grid-template-columns:1fr; }
+  .budget-line-main .budget-bucket-wrap { grid-column:auto; }
+  .budget-line-results { grid-template-columns:1fr; }
+  .budget-line-actions { justify-content:stretch; }
+  .budget-line-actions > * { flex:1; }
+}

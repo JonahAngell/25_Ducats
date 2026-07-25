@@ -1415,3 +1415,229 @@ document.addEventListener('DOMContentLoaded', () => {
     renderBudgetPlannerV7();
   });
 });
+
+// --- v8: 25 Ducats responsive Budgets tab ---
+function renderBudgetPlannerV7() {
+  const list = $('#budgetPlannerCardList');
+  const legacyBody = $('#budgetPlannerTableBody');
+  if (!list && !legacyBody) return;
+  const select = $('#budgetMonthFilter');
+  const selectedMonth = (select && select.value) || currentYearMonth();
+  const monthInput = $('#budgetPlannerMonthInput');
+  if (monthInput) monthInput.value = selectedMonth;
+  const notesInput = $('#budgetPlannerNotesInput');
+  if (notesInput) notesInput.value = monthlyBudgetNoteV7(selectedMonth);
+  const rows = getBudgetRowsForMonthV7(selectedMonth);
+  const computed = computeBudgetRowsV7(rows, selectedMonth);
+  if (list) list.innerHTML = computed.map((line, index) => renderBudgetPlannerCardV8(line, index, computed)).join('');
+  if (legacyBody) legacyBody.innerHTML = '';
+  wireBudgetPlannerInputsV7();
+  updateBudgetPlannerSummaryV7(computed);
+}
+
+function renderBudgetPlannerCardV8(line, index, allLines) {
+  const basisOptions = allLines
+    .filter((basis) => ['income', 'subtotal', 'total'].includes(basis.lineType))
+    .map((basis) => `<option value="${escapeHtml(basis.lineId)}" ${basis.lineId === line.basisLineId ? 'selected' : ''}>${escapeHtml(basis.label)}</option>`)
+    .join('');
+  const bucketOptions = [''].concat(BUDGET_BUCKETS_V7).map((bucket) => `<option value="${escapeHtml(bucket)}" ${bucket === line.bucketId ? 'selected' : ''}>${escapeHtml(bucket ? BUDGET_BUCKET_LABELS_V7[bucket] || bucket : 'None')}</option>`).join('');
+  const varianceClass = Number(line.variance || 0) >= 0 ? 'budget-variance-good' : 'budget-variance-bad';
+  const typeClass = `is-${escapeHtml(line.lineType || 'expense')}`;
+  return `<section class="budget-line-card ${typeClass}" data-budget-row-index="${index}">
+    <div class="budget-line-main">
+      <label>Order<input class="budget-sort-input" type="number" value="${Number(line.sortOrder || 0)}" /></label>
+      <label class="budget-line-title">Line / sub-category<input class="line-label-input" type="text" list="budgetLinePresets" value="${escapeHtml(line.label || '')}" /></label>
+      <label>Type<select class="budget-type-input">${budgetTypeOptionsV7(line.lineType)}</select></label>
+      <label class="budget-bucket-wrap">Bucket<select class="budget-bucket-input">${bucketOptions}</select></label>
+      <label>Actual<input class="budget-actual-input" type="number" step="0.01" value="${line.actualOverride === '' ? Number(line.actualAmount || 0) : Number(line.actualOverride || 0)}" /></label>
+    </div>
+    <div class="budget-line-results">
+      <div class="budget-result-pill"><span>Budget</span><strong>${formatCurrency(line.plannedAmount)}</strong></div>
+      <div class="budget-result-pill"><span>Actual</span><strong>${formatCurrency(line.actualAmount)}</strong></div>
+      <div class="budget-result-pill"><span>Variance</span><strong class="${varianceClass}">${formatCurrency(line.variance)}</strong></div>
+    </div>
+    <div class="budget-line-advanced">
+      <label>Section<select class="section-input">${budgetSectionOptionsV8(line.section)}</select></label>
+      <label>Calculation<select class="budget-calc-input">${budgetCalcOptionsV7(line.calculationType)}</select></label>
+      <label>Value<input class="budget-value-input" type="number" step="0.01" value="${Number(line.calculationValue || 0)}" /></label>
+      <label>Count / multiplier<input class="budget-multiplier-input" type="number" step="0.01" value="${Number(line.multiplier || 1)}" /></label>
+      <label>Basis<select class="budget-basis-input"><option value="">Running subtotal</option>${basisOptions}</select></label>
+    </div>
+    <div class="budget-line-actions">
+      <button type="button" class="budget-toggle-advanced" data-budget-row-action="toggle">Details</button>
+      <button type="button" class="budget-card-button" data-budget-row-action="duplicate">Copy</button>
+      <button type="button" class="budget-card-button danger" data-budget-row-action="delete">Delete</button>
+    </div>
+  </section>`;
+}
+
+function budgetSectionOptionsV8(value) {
+  const presetSections = ['Income', 'Pre-Take-Home', 'Fixed Expenses', 'Savings & Investing', 'Necessities', 'Discretionary', 'Subtotal', 'Total', 'New Section'];
+  return presetSections.map((option) => `<option value="${escapeHtml(option)}" ${option === value ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('');
+}
+
+function readBudgetPlannerRowsFromDomV7() {
+  const month = ($('#budgetPlannerMonthInput') && $('#budgetPlannerMonthInput').value) || ($('#budgetMonthFilter') && $('#budgetMonthFilter').value) || currentYearMonth();
+  return $$('.budget-line-card[data-budget-row-index]').map((card, idx) => {
+    const label = card.querySelector('.line-label-input').value.trim() || `Line ${idx + 1}`;
+    const bucket = card.querySelector('.budget-bucket-input').value;
+    return {
+      budgetMonth: month,
+      lineId: budgetLineIdFromLabelV7(label),
+      parentLineId: '',
+      lineType: card.querySelector('.budget-type-input').value,
+      section: card.querySelector('.section-input').value,
+      sortOrder: Number(card.querySelector('.budget-sort-input').value || ((idx + 1) * 10)),
+      label,
+      bucketId: bucket,
+      categoryId: bucket ? `cat_${bucket}` : '',
+      calculationType: card.querySelector('.budget-calc-input').value,
+      calculationValue: parseMoneyValue(card.querySelector('.budget-value-input').value),
+      multiplier: Number(card.querySelector('.budget-multiplier-input').value || 1),
+      basisLineId: card.querySelector('.budget-basis-input').value,
+      actualOverride: card.querySelector('.budget-actual-input').value === '' ? '' : parseMoneyValue(card.querySelector('.budget-actual-input').value),
+      notes: ''
+    };
+  });
+}
+
+function wireBudgetPlannerInputsV7() {
+  $$('.budget-line-card input, .budget-line-card select').forEach((input) => input.addEventListener('input', () => {
+    const month = ($('#budgetPlannerMonthInput') && $('#budgetPlannerMonthInput').value) || currentYearMonth();
+    const rows = readBudgetPlannerRowsFromDomV7();
+    const computed = computeBudgetRowsV7(rows, month);
+    updateBudgetPlannerSummaryV7(computed);
+  }));
+  $$('.budget-line-card button[data-budget-row-action]').forEach((button) => button.addEventListener('click', handleBudgetRowActionV7));
+}
+
+function handleBudgetRowActionV7(event) {
+  const action = event.currentTarget.dataset.budgetRowAction;
+  const card = event.currentTarget.closest('.budget-line-card');
+  if (action === 'toggle') {
+    card.classList.toggle('expanded');
+    return;
+  }
+  const rows = readBudgetPlannerRowsFromDomV7();
+  const index = Number(card.dataset.budgetRowIndex);
+  if (action === 'delete') rows.splice(index, 1);
+  if (action === 'duplicate') rows.splice(index + 1, 0, { ...rows[index], sortOrder: Number(rows[index].sortOrder || 0) + 1, label: `${rows[index].label} Copy`, lineId: budgetLineIdFromLabelV7(`${rows[index].label} Copy`) });
+  const month = ($('#budgetPlannerMonthInput') && $('#budgetPlannerMonthInput').value) || currentYearMonth();
+  state.budgetPlanRows = (state.budgetPlanRows || []).filter((row) => normaliseMonthValue(row.budgetMonth) !== month).concat(rows.map((row) => normaliseBudgetPlanRowV7(row)));
+  renderBudgetPlannerV7();
+}
+
+function addBudgetLineV7() {
+  const month = ($('#budgetPlannerMonthInput') && $('#budgetPlannerMonthInput').value) || currentYearMonth();
+  const rows = readBudgetPlannerRowsFromDomV7();
+  rows.push({ budgetMonth: month, lineId: `line_${Date.now()}`, lineType: 'expense', section: 'New Section', sortOrder: rows.length ? Math.max(...rows.map((r) => Number(r.sortOrder || 0))) + 10 : 10, label: 'New Budget Line', bucketId: '', categoryId: '', calculationType: 'fixed', calculationValue: 0, multiplier: 1, basisLineId: '', actualOverride: '', notes: '' });
+  state.budgetPlanRows = (state.budgetPlanRows || []).filter((row) => normaliseMonthValue(row.budgetMonth) !== month).concat(rows.map(normaliseBudgetPlanRowV7));
+  renderBudgetPlannerV7();
+}
+
+function showDucatsEasterEggV8() {
+  let toast = $('#ducatsToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'ducatsToast';
+    toast.className = 'ducats-toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = "I hand my cousin twenty-five ducats, I'm sweating buckets. He hands me a sandwich bag with some little green nuggets.";
+  toast.classList.add('show');
+  window.setTimeout(() => toast.classList.remove('show'), 4200);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const egg = $('#ducatsEasterEgg');
+  if (egg) egg.addEventListener('click', showDucatsEasterEggV8);
+  const existingDatalist = $('#budgetLinePresets');
+  if (!existingDatalist) {
+    const datalist = document.createElement('datalist');
+    datalist.id = 'budgetLinePresets';
+    ['Pay','Taxes','401K','Rent','Tithing','Car Payment','Car Insurance','Career','Savings','Stocks','Food','Car Charging','Fun','Other Spending','Subtotal (Take-Home Pay)','Subtotal (After Fixed Expenses)','Subtotal (After Savings)','Subtotal (After Necessities)','Total'].forEach((value) => {
+      const option = document.createElement('option');
+      option.value = value;
+      datalist.appendChild(option);
+    });
+    document.body.appendChild(datalist);
+  }
+});
+
+// --- v9: full mobile app shell and card-first rendering ---
+function switchView(view) {
+  state.activeView = view;
+  $$('.view').forEach((section) => section.classList.remove('active'));
+  const target = $(`#${view}View`) || $('#dashboardView');
+  target.classList.add('active');
+  $$('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.view === view));
+  const titles = { dashboard: 'Dashboard', buckets: 'Buckets', transfers: 'Transfers', admin: 'Bucket Admin', transactions: 'Transactions', budgets: 'Budgets', settings: 'Settings' };
+  if (elements.viewTitle) elements.viewTitle.textContent = titles[view] || titleCase(view);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function renderTransactionsTable() {
+  const body = $('#transactionsTableBody');
+  const cardList = $('#transactionsCardList');
+  const query = ($('#transactionSearch') && $('#transactionSearch').value.trim().toLowerCase()) || '';
+  const month = ($('#monthFilter') && $('#monthFilter').value) || '';
+  const category = ($('#categoryFilter') && $('#categoryFilter').value) || '';
+  const filtered = state.transactions.filter((txn) => {
+    const haystack = [txn.description, txn.merchant, txn.notes, txn.transactionDate].join(' ').toLowerCase();
+    return (!query || haystack.includes(query)) && (!month || transactionMonth(txn.transactionDate) === month) && (!category || txn.categoryId === category);
+  }).sort((a,b) => String(b.transactionDate).localeCompare(String(a.transactionDate))).slice(0, 500);
+  if (body) {
+    body.innerHTML = filtered.map((txn) => `<tr><td>${escapeHtml(txn.transactionDate || '')}</td><td>${escapeHtml(txn.description || '')}</td><td>${escapeHtml(txn.merchant || '')}</td><td>${escapeHtml(categoryName(txn.categoryId))}</td><td>${escapeHtml(accountName(txn.accountId))}</td><td class="amount-col ${amountClass(txn.amount)}">${formatCurrency(Number(txn.amount || 0))}</td></tr>`).join('') || `<tr><td colspan="6">No transactions match the current filters.</td></tr>`;
+  }
+  if (cardList) {
+    cardList.innerHTML = filtered.map((txn) => `<article class="mobile-data-card"><div class="mobile-card-head"><strong>${escapeHtml(txn.description || txn.merchant || 'Transaction')}</strong><span class="${amountClass(txn.amount)}">${formatCurrency(Number(txn.amount || 0))}</span></div><div class="mobile-card-row"><span>Date</span><strong>${escapeHtml(txn.transactionDate || '')}</strong></div><div class="mobile-card-row"><span>Merchant</span><strong>${escapeHtml(txn.merchant || '—')}</strong></div><div class="mobile-card-row"><span>Bucket</span><strong>${escapeHtml(bucketNameById(txn.bucketId || txn.accountId) || accountName(txn.accountId) || '—')}</strong></div></article>`).join('') || `<div class="empty-state">No transactions match the current filters.</div>`;
+  }
+}
+
+function renderBucketView() {
+  const body = $('#bucketsTableBody');
+  const cardList = $('#bucketsCardList');
+  const month = getSelectedBucketMonth();
+  const rows = buildBucketRows(month);
+  setTextV9('#bucketMetricPlanned', formatCurrency(sum(rows.map((row) => row.planned))));
+  setTextV9('#bucketMetricFunded', formatCurrency(sum(rows.map((row) => row.funded))));
+  setTextV9('#bucketMetricSpent', formatCurrency(sum(rows.map((row) => row.spent))));
+  setTextV9('#bucketMetricAvailable', formatCurrency(sum(rows.map((row) => row.currentBalance))));
+  const tableRows = rows.map((row) => {
+    const statusClass = row.currentBalance < 0 ? 'status-danger' : row.monthRemaining < 0 ? 'status-warning' : 'status-ok';
+    const statusText = row.currentBalance < 0 ? 'Negative balance' : row.monthRemaining < 0 ? 'Over monthly plan' : 'On track';
+    return `<tr><td class="bucket-name-cell"><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.id)}</small></td><td class="amount-col">${formatCurrency(row.planned)}</td><td class="amount-col amount-positive">${formatCurrency(row.funded)}</td><td class="amount-col amount-negative">${formatCurrency(row.spent)}</td><td class="amount-col ${row.monthRemaining < 0 ? 'amount-negative' : ''}">${formatCurrency(row.monthRemaining)}</td><td class="amount-col ${row.currentBalance < 0 ? 'amount-negative' : 'amount-positive'}">${formatCurrency(row.currentBalance)}</td><td><span class="status-pill ${statusClass}">${statusText}</span></td></tr>`;
+  }).join('') || `<tr><td colspan="7">No bucket data loaded.</td></tr>`;
+  if (body) body.innerHTML = tableRows;
+  if (cardList) {
+    cardList.innerHTML = rows.map((row) => {
+      const statusClass = row.currentBalance < 0 ? 'status-danger' : row.monthRemaining < 0 ? 'status-warning' : 'status-ok';
+      const statusText = row.currentBalance < 0 ? 'Negative balance' : row.monthRemaining < 0 ? 'Over monthly plan' : 'On track';
+      return `<article class="mobile-data-card"><div class="mobile-card-head"><strong>${escapeHtml(row.name)}</strong><span class="status-pill ${statusClass}">${statusText}</span></div><div class="mobile-card-row"><span>Available</span><strong class="${row.currentBalance < 0 ? 'amount-negative' : 'amount-positive'}">${formatCurrency(row.currentBalance)}</strong></div><div class="mobile-card-row"><span>Planned</span><strong>${formatCurrency(row.planned)}</strong></div><div class="mobile-card-row"><span>Spent</span><strong class="amount-negative">${formatCurrency(row.spent)}</strong></div><div class="mobile-card-row"><span>Remaining</span><strong class="${row.monthRemaining < 0 ? 'amount-negative' : ''}">${formatCurrency(row.monthRemaining)}</strong></div></article>`;
+    }).join('') || `<div class="empty-state">No bucket data loaded.</div>`;
+  }
+}
+
+function renderTransferHistory() {
+  const body = $('#transfersTableBody');
+  const cardList = $('#transfersCardList');
+  const rows = [...state.bucketTransfers].sort((a,b) => String(b.transferDate).localeCompare(String(a.transferDate))).slice(0, 200);
+  if (body) body.innerHTML = rows.map((transfer) => `<tr><td>${escapeHtml(transfer.transferDate || '')}</td><td>${escapeHtml(bucketNameById(transfer.fromBucketId))}</td><td>${escapeHtml(bucketNameById(transfer.toBucketId))}</td><td class="amount-col">${formatCurrency(transfer.amount)}</td><td>${escapeHtml(transfer.reason || '')}</td></tr>`).join('') || `<tr><td colspan="5">No transfers recorded yet.</td></tr>`;
+  if (cardList) cardList.innerHTML = rows.map((transfer) => `<article class="mobile-data-card"><div class="mobile-card-head"><strong>${formatCurrency(transfer.amount)}</strong><small>${escapeHtml(transfer.transferDate || '')}</small></div><div class="mobile-card-row"><span>From</span><strong>${escapeHtml(bucketNameById(transfer.fromBucketId))}</strong></div><div class="mobile-card-row"><span>To</span><strong>${escapeHtml(bucketNameById(transfer.toBucketId))}</strong></div>${transfer.reason ? `<div class="mobile-card-row"><span>Reason</span><strong>${escapeHtml(transfer.reason)}</strong></div>` : ''}</article>`).join('') || `<div class="empty-state">No transfers recorded yet.</div>`;
+}
+
+function renderAliasTable() {
+  const body = $('#bucketAliasTableBody');
+  const cardList = $('#bucketAliasCardList');
+  const rows = [...state.bucketAliases].sort((a,b) => String(a.status).localeCompare(String(b.status)) || String(a.alias).localeCompare(String(b.alias)));
+  if (body) body.innerHTML = rows.map((alias) => {
+    const statusClass = String(alias.status).toLowerCase() === 'active' ? 'alias-active' : 'alias-retired';
+    return `<tr><td>${escapeHtml(alias.alias || '')}</td><td>${escapeHtml(alias.currentBucketName || bucketNameById(alias.currentBucketId))}</td><td class="${statusClass}">${escapeHtml(alias.status || '')}</td><td class="amount-col ${amountClass(alias.netAmount)}">${formatCurrency(alias.netAmount)}</td></tr>`;
+  }).join('') || `<tr><td colspan="4">No aliases loaded.</td></tr>`;
+  if (cardList) cardList.innerHTML = rows.map((alias) => `<article class="mobile-data-card"><div class="mobile-card-head"><strong>${escapeHtml(alias.alias || 'Alias')}</strong><span>${escapeHtml(alias.status || '')}</span></div><div class="mobile-card-row"><span>Current Bucket</span><strong>${escapeHtml(alias.currentBucketName || bucketNameById(alias.currentBucketId))}</strong></div><div class="mobile-card-row"><span>Net</span><strong class="${amountClass(alias.netAmount)}">${formatCurrency(alias.netAmount)}</strong></div></article>`).join('') || `<div class="empty-state">No aliases loaded.</div>`;
+}
+
+function setTextV9(selector, text) {
+  const node = $(selector);
+  if (node) node.textContent = text;
+}

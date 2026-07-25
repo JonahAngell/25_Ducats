@@ -1,0 +1,70 @@
+/* Mobile-first overrides and budget planner cards */
+.desktop-table-only { display: none; }
+.budget-planner-card { padding-bottom: 22px; }
+.budget-planner-toolbar { display:grid; grid-template-columns:minmax(180px,240px) 1fr; gap:12px; margin-bottom:14px; }
+.budget-planner-layout { display:grid; grid-template-columns:250px minmax(0,1fr); gap:14px; align-items:start; }
+.budget-planner-help { background:var(--panel-soft); border:1px solid var(--line); border-radius:18px; padding:14px; position:sticky; top:94px; }
+.budget-planner-help summary { cursor:pointer; font-weight:900; }
+.budget-planner-help ul { padding-left:18px; margin:10px 0 0; color:var(--muted); line-height:1.4; }
+.budget-card-list { display:grid; gap:12px; }
+.budget-line-card { background:white; border:1px solid var(--line); border-radius:18px; padding:14px; box-shadow:0 10px 26px rgba(28,43,70,.06); }
+.budget-line-card.is-subtotal, .budget-line-card.is-total { background:#f6f9ff; border-color:#bfd0ff; }
+.budget-line-card.is-income { background:#f0fdf6; }
+.budget-line-card.is-deduction { background:#fff7ed; }
+.budget-line-main { display:grid; grid-template-columns:72px 1.2fr 145px 145px 145px; gap:10px; align-items:end; }
+.budget-line-main label, .budget-line-advanced label { gap:5px; font-size:.76rem; }
+.budget-line-title input { font-weight:900; }
+.budget-line-results { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-top:12px; }
+.budget-result-pill { background:var(--panel-soft); border:1px solid var(--line); border-radius:14px; padding:10px; }
+.budget-result-pill span { display:block; color:var(--muted); font-size:.72rem; font-weight:900; text-transform:uppercase; letter-spacing:.05em; }
+.budget-result-pill strong { display:block; margin-top:4px; font-size:1rem; }
+.budget-line-advanced { display:none; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin-top:12px; padding-top:12px; border-top:1px dashed var(--line); }
+.budget-line-card.expanded .budget-line-advanced { display:grid; }
+.budget-line-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; margin-top:12px; }
+.budget-toggle-advanced { color:var(--primary); background:transparent; border:0; padding:8px 4px; font-weight:900; }
+.budget-card-button { border:1px solid var(--line); background:#fff; color:var(--primary); border-radius:12px; padding:8px 10px; font-weight:900; }
+.budget-card-button.danger { color:var(--danger); }
+.budget-variance-good { color:var(--success); }
+.budget-variance-bad { color:var(--danger); }
+.ducats-egg { transition:.2s ease; }
+.ducats-egg:hover { transform:rotate(-8deg) scale(1.04); }
+.ducats-toast { position:fixed; left:50%; bottom:calc(90px + env(safe-area-inset-bottom)); transform:translateX(-50%) translateY(10px); opacity:0; background:#101827; color:#fff; padding:13px 18px; border-radius:999px; box-shadow:var(--shadow); z-index:90; transition:.22s ease; max-width:min(680px, calc(100vw - 32px)); text-align:center; }
+.ducats-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+@media (min-width: 1080px) {
+  .main-panel { padding-left: 28px; padding-right: 28px; max-width: 1380px; width: 100%; margin: 0 auto; }
+  .two-column { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+  .desktop-table-only { display:block; }
+  .mobile-card-list + .desktop-table-only { margin-top: 14px; }
+}
+@media (max-width: 1080px) {
+  .budget-planner-layout { grid-template-columns:1fr; }
+  .budget-planner-help { position:static; }
+  .budget-line-main { grid-template-columns:68px 1fr 140px 140px; }
+  .budget-line-main .budget-bucket-wrap { grid-column:3 / span 2; }
+  .two-column { grid-template-columns:1fr; }
+}
+@media (max-width: 760px) {
+  .app-header { grid-template-columns:1fr; }
+  .header-actions { display:grid; grid-template-columns:1fr 1fr; }
+  .icon-label span:last-child { display:none; }
+  .mobile-metrics, .compact-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .budget-summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .panel-card { padding:14px; border-radius:18px; }
+  .notice, .card-heading, .responsive-heading { flex-direction:column; align-items:stretch; }
+  .compact-filter-row, .budget-builder-actions, .mobile-action-row { display:grid; grid-template-columns:1fr; width:100%; }
+  .mobile-form-inline, .budget-planner-toolbar { grid-template-columns:1fr; }
+  .budget-line-main, .budget-line-advanced, .budget-line-card.expanded .budget-line-advanced { grid-template-columns:1fr; }
+  .budget-line-main .budget-bucket-wrap { grid-column:auto; }
+  .budget-line-results { grid-template-columns:1fr; }
+  .budget-line-actions { justify-content:stretch; }
+  .budget-line-actions > * { flex:1; }
+  .form-grid { grid-template-columns:1fr; }
+  #transactionDialog { width:100vw; max-width:100vw; height:100dvh; max-height:100dvh; border-radius:0; }
+  #transactionDialog .dialog-card { min-height:100dvh; overflow:auto; padding:18px 16px calc(24px + env(safe-area-inset-bottom)); }
+}
+@media (max-width: 430px) {
+  .main-panel { padding-left: 10px; padding-right: 10px; }
+  .mobile-metrics, .compact-summary, .budget-summary-grid { grid-template-columns:1fr; }
+  .bottom-nav .nav-item small { font-size:.62rem; }
+  .bottom-nav { padding-left:6px; padding-right:6px; }
+}
