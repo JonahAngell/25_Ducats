@@ -1,63 +1,37 @@
-# 25 Ducats v13 - Budget ordering and local draft saves
+# 25 Ducats v16 - Home spent vs budget
 
-This package updates the Budget page workflow.
+This package updates the Home screen bucket chart.
 
-## Budget page ordering
+## Change
 
-The Budget page now groups content in this order:
+The Home screen no longer shows only a ranked bar chart of spending by bucket.
 
-1. Gross
-2. Take-Home
-3. Fixed Expenses
-4. Savings
-5. Necessities
-6. Other
+It now shows each bucket's monthly spend compared with that bucket's planned budget:
 
-Default placement:
+- amount spent
+- budget amount
+- percent used
+- remaining amount or over-budget amount
+- colour-coded spending status
 
-- Gross: Total Pay / income forecast
-- Take-Home: Taxes, 401K
-- Fixed Expenses: Rent, Tithing, Car Payment, Car Insurance, and the Car bucket by default
-- Savings: Career, Savings, Stocks
-- Necessities: Food and variable car items such as Car Charging
-- Other: Fun and Other Expenses
+## Colour coding
 
-Car expenses can be split by planned expense placement. The Car bucket defaults to Fixed Expenses, but planned expense rows such as Car Charging default to Necessities so fixed and variable car spending can both be represented.
+- Green: low spending
+- Yellow/amber: getting closer to budget
+- Orange: near budget
+- Red: over budget, or spending exists with no budget set
 
-## New Organise screen
+## Budget source
 
-The Budgets page now has an Organise button. It opens a screen where you can move buckets and planned expense rows between the six budget categories.
-
-The layout is saved locally in the browser.
-
-## Local draft saves
-
-Budget field edits no longer post to Google Sheets continuously. Changes are backed up locally in browser storage as a draft.
-
-The app pushes the latest budget to Google Sheets when:
-
-- the user presses Save Budget, or
-- the user leaves the Budgets screen while there are unsaved budget changes.
-
-A small Local draft saved indicator appears while edits are waiting to sync.
-
-## Visual changes
-
-Fixed and percentage budget entries are visually distinguished:
-
-- Fixed entries use a blue Fixed dollar amount pill.
-- Percentage entries use a green Percentage based pill and show the selected percentage basis.
-
-## Files
-
-- index.html
-- app.js
-- Code.gs
-- styles/base.css
-- styles/components.css
-- styles/mobile.css
-- styles.css
+The Home screen budget comparison uses the newer custom budget line items from `BudgetPlannedExpenses` when available. If no line items exist for a bucket, it falls back to the bucket-level rows in `Budgets`.
 
 ## Backend
 
-No new Apps Script backend action is required for this update. The included Code.gs is packaged for convenience and keeps the v12 budget support actions.
+No Apps Script backend change is required for this update. The included `Code.gs` is unchanged from the attached version and is packaged for convenience.
+
+## Files to replace
+
+- `index.html`
+- `app.js`
+- `styles/mobile.css`
+- optionally `styles.css` if your deployment references the single legacy stylesheet

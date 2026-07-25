@@ -2444,3 +2444,478 @@ document.addEventListener('DOMContentLoaded', () => {
   const resetLayout = $('#resetBudgetLayoutButton');
   if (resetLayout) resetLayout.addEventListener('click', resetBudgetLayoutV13);
 });
+
+// --- v14: drill-down screens, editable transactions, editable income, and budget line-item pane ---
+state.selectedBucketId = '';
+state.selectedTransactionId = '';
+state.previousView = 'dashboard';
+
+function normalisePlannedExpenseV12(row) {
+  return {
+    ...row,
+    id: row.id || '',
+    budgetMonth: normaliseMonthValue(row.budgetMonth),
+    bucketId: bucketIdFromAny(row.bucketId || row.bucketID || ''),
+    expenseName: row.expenseName || row.name || '',
+    budgetCategory: row.budgetCategory || row.groupId || 'other',
+    allocationType: row.allocationType || 'fixed',
+    allocationBasis: row.allocationBasis || 'net_income',
+    frequency: row.frequency || 'monthly',
+    dayOfWeek: row.dayOfWeek === '' || row.dayOfWeek === undefined ? '' : String(row.dayOfWeek),
+    amount: parseMoneyValue(row.amount),
+    monthlyCalculatedAmount: parseMoneyValue(row.monthlyCalculatedAmount),
+    autoGenerateTransaction: normaliseBoolean(row.autoGenerateTransaction),
+    requiresManualActual: String(row.requiresManualActual || '').toLowerCase() === 'true' || row.requiresManualActual === true,
+    startDate: normaliseDateValue(row.startDate || ''),
+    endDate: normaliseDateValue(row.endDate || ''),
+    notes: row.notes || ''
+  };
+}
+
+function calculatePlannedExpenseMonthlyAmountV12(expense, month) {
+  const basisForecast = calculateIncomeForecastV12(month);
+  const baseAmount = expense.allocationType === 'percentage' ? getBasisAmountV12(expense.allocationBasis || 'net_income', basisForecast, []) * (Number(expense.amount || 0) / 100) : Number(expense.amount || 0);
+  if (expense.frequency === 'weekly') return roundCurrencyV12(baseAmount * countWeekdayInMonthV12(month, Number(expense.dayOfWeek || 0)));
+  return roundCurrencyV12(baseAmount);
+}
+
+function renderCategoryBreakdown(txns) {
+  const container = $('#categoryBreakdown');
+  const spending = txns.filter((t) => Number(t.amount) < 0);
+  const byBucket = new Map();
+  spending.forEach((txn) => {
+    const bucketId = effectiveBucketId(txn.bucketId || txn.accountId);
+    byBucket.set(bucketId, (byBucket.get(bucketId) || 0) + Math.abs(Number(txn.amount)));
+  });
+  const rows = Array.from(byBucket.entries()).sort((a,b) => b[1] - a[1]).slice(0, 8);
+  const max = rows.length ? rows[0][1] : 0;
+  if (!rows.length) {
+    container.className = 'breakdown-list empty-state';
+    container.textContent = 'No spending transactions for the selected month.';
+    return;
+  }
+  container.className = 'breakdown-list';
+  container.innerHTML = rows.map(([bucketId, amount]) => {
+    const pct = max ? Math.max(4, Math.round((amount / max) * 100)) : 0;
+    return `<button type="button" class="breakdown-row clickable-card" data-open-bucket="${escapeHtml(bucketId)}"><div class="breakdown-row-top"><strong>${escapeHtml(bucketNameById(bucketId))}</strong><span>${formatCurrency(amount)}</span></div><div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div></button>`;
+  }).join('');
+  wireDrilldownLinksV14();
+}
+
+function renderRecentTransactions() {
+  const container = $('#recentTransactions');
+  const recent = [...state.transactions].filter((t) => t.transactionDate).sort((a,b) => String(b.transactionDate).localeCompare(String(a.transactionDate))).slice(0, 8);
+  if (!recent.length) {
+    container.className = 'compact-list empty-state';
+    container.textContent = 'No transactions loaded yet.';
+    return;
+  }
+  container.className = 'compact-list';
+  container.innerHTML = recent.map((txn) => `<button type="button" class="compact-row clickable-card" data-open-transaction="${escapeHtml(txn.id)}"><div class="compact-row-top"><strong>${escapeHtml(txn.description || txn.merchant || 'Transaction')}</strong><span class="${amountClass(txn.amount)}">${formatCurrency(Number(txn.amount))}</span></div><small>${escapeHtml(txn.transactionDate || '')} • ${escapeHtml(bucketNameById(txn.bucketId || txn.accountId))}</small></button>`).join('');
+  wireDrilldownLinksV14();
+}
+
+function renderTransactionsTable() {
+  const body = $('#transactionsTableBody');
+  const cardList = $('#transactionsCardList');
+  const query = ($('#transactionSearch') && $('#transactionSearch').value.trim().toLowerCase()) || '';
+  const month = ($('#monthFilter') && $('#monthFilter').value) || '';
+  const category = ($('#categoryFilter') && $('#categoryFilter').value) || '';
+  const filtered = state.transactions.filter((txn) => {
+    const haystack = [txn.description, txn.merchant, txn.notes, txn.transactionDate].join(' ').toLowerCase();
+    return (!query || haystack.includes(query)) && (!month || transactionMonth(txn.transactionDate) === month) && (!category || txn.categoryId === category);
+  }).sort((a,b) => String(b.transactionDate).localeCompare(String(a.transactionDate))).slice(0, 500);
+  if (body) body.innerHTML = filtered.map((txn) => `<tr class="clickable-row" data-open-transaction="${escapeHtml(txn.id)}"><td>${escapeHtml(txn.transactionDate || '')}</td><td>${escapeHtml(txn.description || '')}</td><td>${escapeHtml(txn.merchant || '')}</td><td>${escapeHtml(categoryName(txn.categoryId))}</td><td>${escapeHtml(bucketNameById(txn.bucketId || txn.accountId) || accountName(txn.accountId))}</td><td class="amount-col ${amountClass(txn.amount)}">${formatCurrency(Number(txn.amount || 0))}</td></tr>`).join('') || `<tr><td colspan="6">No transactions match the current filters.</td></tr>`;
+  if (cardList) cardList.innerHTML = filtered.map((txn) => `<article class="mobile-data-card clickable-card" data-open-transaction="${escapeHtml(txn.id)}"><div class="mobile-card-head"><strong>${escapeHtml(txn.description || txn.merchant || 'Transaction')}</strong><span class="${amountClass(txn.amount)}">${formatCurrency(Number(txn.amount || 0))}</span></div><div class="mobile-card-row"><span>Date</span><strong>${escapeHtml(txn.transactionDate || '')}</strong></div><div class="mobile-card-row"><span>Merchant</span><strong>${escapeHtml(txn.merchant || '—')}</strong></div><div class="mobile-card-row"><span>Bucket</span><strong>${escapeHtml(bucketNameById(txn.bucketId || txn.accountId) || accountName(txn.accountId) || '—')}</strong></div></article>`).join('') || `<div class="empty-state">No transactions match the current filters.</div>`;
+  wireDrilldownLinksV14();
+}
+
+function renderBucketView() {
+  const cardList = $('#bucketsCardList');
+  const body = $('#bucketsTableBody');
+  const month = getSelectedBucketMonth();
+  const rows = buildBucketRows(month);
+  const totalAvailable = sum(rows.map((row) => row.currentBalance));
+  const totalChange = sum(rows.map((row) => monthChangeForBucketV14(row.id, month)));
+  setTextV9('#bucketMetricPlanned', formatCurrency(totalAvailable));
+  setTextV9('#bucketMetricFunded', formatCurrency(totalChange));
+  setTextV9('#bucketMetricSpent', `${rows.length}`);
+  setTextV9('#bucketMetricAvailable', formatCurrency(totalAvailable));
+  const metrics = $$('#bucketsView .mini-metric span');
+  if (metrics[0]) metrics[0].textContent = 'Total Stored';
+  if (metrics[1]) metrics[1].textContent = 'Month Change';
+  if (metrics[2]) metrics[2].textContent = 'Buckets';
+  if (metrics[3]) metrics[3].textContent = 'Available';
+  const cards = rows.map((row) => {
+    const change = monthChangeForBucketV14(row.id, month);
+    const cls = change > 0 ? 'positive' : change < 0 ? 'negative' : '';
+    return `<article class="bucket-focus-card clickable-card" data-open-bucket="${escapeHtml(row.id)}"><div><h4>${escapeHtml(row.name)}</h4><small>${escapeHtml(row.id)}</small><span class="bucket-change-pill ${cls}">${change >= 0 ? '+' : ''}${formatCurrency(change)} since previous month</span></div><div class="bucket-focus-balance ${row.currentBalance < 0 ? 'amount-negative' : 'amount-positive'}">${formatCurrency(row.currentBalance)}</div></article>`;
+  }).join('') || `<div class="empty-state">No bucket data loaded.</div>`;
+  if (cardList) { cardList.className = 'bucket-focus-list'; cardList.innerHTML = cards; }
+  if (body) body.innerHTML = rows.map((row) => `<tr class="clickable-row" data-open-bucket="${escapeHtml(row.id)}"><td>${escapeHtml(row.name)}</td><td class="amount-col ${row.currentBalance < 0 ? 'amount-negative' : 'amount-positive'}">${formatCurrency(row.currentBalance)}</td><td class="amount-col ${monthChangeForBucketV14(row.id, month) < 0 ? 'amount-negative' : 'amount-positive'}">${formatCurrency(monthChangeForBucketV14(row.id, month))}</td></tr>`).join('');
+  wireDrilldownLinksV14();
+}
+
+function monthChangeForBucketV14(bucketId, month) {
+  const prev = previousMonthV14(month);
+  const currentNet = sum(state.transactions.filter((txn) => transactionMonth(txn.transactionDate) === month && effectiveBucketId(txn.bucketId || txn.accountId) === bucketId).map((txn) => Number(txn.amount || 0)));
+  const previousNet = sum(state.transactions.filter((txn) => transactionMonth(txn.transactionDate) === prev && effectiveBucketId(txn.bucketId || txn.accountId) === bucketId).map((txn) => Number(txn.amount || 0)));
+  return roundCurrencyV12(currentNet - previousNet);
+}
+function previousMonthV14(month) { const d = new Date(`${month || currentYearMonth()}-01T00:00:00`); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0,7); }
+
+function wireDrilldownLinksV14() {
+  $$('[data-open-bucket]').forEach((node) => { if (!node.dataset.drillWired) { node.dataset.drillWired = 'true'; node.addEventListener('click', () => openBucketDetailV14(node.dataset.openBucket)); } });
+  $$('[data-open-transaction]').forEach((node) => { if (!node.dataset.drillWired) { node.dataset.drillWired = 'true'; node.addEventListener('click', () => openTransactionDetailV14(node.dataset.openTransaction)); } });
+}
+
+function openBucketDetailV14(bucketId) {
+  state.previousView = state.activeView || 'buckets';
+  state.selectedBucketId = bucketId;
+  const monthFilter = $('#bucketDetailMonthFilter');
+  const bucketMonth = $('#bucketMonthFilter');
+  if (monthFilter && bucketMonth) { monthFilter.innerHTML = bucketMonth.innerHTML; monthFilter.value = bucketMonth.value || getSelectedBucketMonth(); }
+  renderBucketDetailV14();
+  switchView('bucketDetail');
+}
+function renderBucketDetailV14() {
+  const bucketId = state.selectedBucketId;
+  const month = ($('#bucketDetailMonthFilter') && $('#bucketDetailMonthFilter').value) || getSelectedBucketMonth();
+  const all = state.transactions.filter((txn) => effectiveBucketId(txn.bucketId || txn.accountId) === bucketId);
+  const monthTxns = all.filter((txn) => transactionMonth(txn.transactionDate) === month);
+  const balance = sum(all.map((txn) => Number(txn.amount || 0)));
+  $('#bucketDetailTitle').textContent = bucketNameById(bucketId);
+  $('#bucketDetailSubtitle').textContent = `Recent activity for ${month}`;
+  $('#bucketDetailBalance').textContent = formatCurrency(balance);
+  $('#bucketDetailMonthChange').textContent = formatCurrency(monthChangeForBucketV14(bucketId, month));
+  $('#bucketDetailFunded').textContent = formatCurrency(sum(monthTxns.filter((txn) => Number(txn.amount) > 0).map((txn) => Number(txn.amount))));
+  $('#bucketDetailSpent').textContent = formatCurrency(sum(monthTxns.filter((txn) => Number(txn.amount) < 0).map((txn) => Math.abs(Number(txn.amount)))));
+  const list = $('#bucketDetailTransactions');
+  list.innerHTML = monthTxns.sort((a,b) => String(b.transactionDate).localeCompare(String(a.transactionDate))).map((txn) => `<article class="mobile-data-card clickable-card" data-open-transaction="${escapeHtml(txn.id)}"><div class="mobile-card-head"><strong>${escapeHtml(txn.description || txn.merchant || 'Transaction')}</strong><span class="${amountClass(txn.amount)}">${formatCurrency(txn.amount)}</span></div><div class="mobile-card-row"><span>Date</span><strong>${escapeHtml(txn.transactionDate)}</strong></div><div class="mobile-card-row"><span>Merchant</span><strong>${escapeHtml(txn.merchant || '—')}</strong></div></article>`).join('') || '<div class="empty-state">No transactions for this bucket in the selected month.</div>';
+  wireDrilldownLinksV14();
+}
+
+function openTransactionDetailV14(transactionId) {
+  const txn = state.transactions.find((item) => item.id === transactionId);
+  if (!txn) return showToast('Transaction not found.');
+  state.previousView = state.activeView || 'transactions';
+  state.selectedTransactionId = transactionId;
+  populateTransactionDetailSelectsV14();
+  $('#transactionDetailIdInput').value = txn.id;
+  $('#transactionDetailDateInput').value = txn.transactionDate || '';
+  $('#transactionDetailAmountInput').value = Number(txn.amount || 0);
+  $('#transactionDetailMerchantInput').value = txn.merchant || '';
+  $('#transactionDetailDescriptionInput').value = txn.description || '';
+  $('#transactionDetailCategoryInput').value = txn.categoryId || '';
+  $('#transactionDetailBucketInput').value = effectiveBucketId(txn.bucketId || txn.accountId);
+  $('#transactionDetailNotesInput').value = txn.notes || '';
+  $('#transactionDetailTitle').textContent = txn.description || txn.merchant || 'Transaction';
+  switchView('transactionDetail');
+}
+function populateTransactionDetailSelectsV14() {
+  safeFillSelect($('#transactionDetailCategoryInput'), state.categories.map((c) => ({ value: c.id, label: c.name || c.id })));
+  safeFillSelect($('#transactionDetailBucketInput'), activeBucketAccounts().map((a) => ({ value: effectiveBucketId(a.bucketId || a.id || a.name), label: a.name || bucketNameById(a.bucketId || a.id) })));
+}
+async function submitTransactionDetailV14(event) {
+  event.preventDefault();
+  try {
+    const id = $('#transactionDetailIdInput').value;
+    const bucketId = $('#transactionDetailBucketInput').value;
+    const payload = {
+      id,
+      transactionDate: $('#transactionDetailDateInput').value,
+      amount: parseMoneyValue($('#transactionDetailAmountInput').value),
+      merchant: $('#transactionDetailMerchantInput').value.trim(),
+      description: $('#transactionDetailDescriptionInput').value.trim(),
+      categoryId: $('#transactionDetailCategoryInput').value || `cat_${bucketId}`,
+      accountId: `acct_${bucketId}`,
+      bucketId,
+      notes: $('#transactionDetailNotesInput').value.trim()
+    };
+    const result = await callPost('updateTransaction', payload);
+    const updated = normaliseTransaction(result.transaction || payload);
+    state.transactions = state.transactions.map((txn) => txn.id === id ? updated : txn);
+    localStorage.setItem(STORAGE_KEYS.cache, JSON.stringify(getCacheShape()));
+    renderAll();
+    showToast('Transaction updated.');
+    switchView(state.previousView || 'transactions');
+  } catch (error) { showToast(error.message); }
+}
+
+function renderIncomeSummaryV12(month, forecast) {
+  const container = $('#budgetIncomeSummary');
+  if (!container) return;
+  const schedules = forecast.schedules || [];
+  container.innerHTML = schedules.length ? schedules.map((s) => `<button type="button" class="budget-income-pill clickable-card" data-edit-income="${escapeHtml(s.id)}"><span>${escapeHtml(s.incomeName)}</span><strong>${formatCurrency(calculateIncomeForScheduleV12(s, month))}</strong><small>${escapeHtml(titleCase(s.frequency))} • ${escapeHtml(s.amountBasis)}</small></button>`).join('') : `<div class="empty-state">No income schedule saved yet. Add income to forecast available money.</div>`;
+  $$('[data-edit-income]').forEach((button) => button.addEventListener('click', () => openIncomeDialogV14(button.dataset.editIncome)));
+}
+function openIncomeDialogV14(id) {
+  const first = id ? (state.budgetIncome || []).find((row) => row.id === id) : (state.budgetIncome || [])[0];
+  $('#incomeIdInput').value = first ? first.id : '';
+  $('#incomeNameInput').value = first ? first.incomeName : 'Primary Pay';
+  $('#incomeAmountInput').value = first ? Number(first.amount || 0) : '';
+  $('#incomeBasisInput').value = first ? first.amountBasis : 'net';
+  $('#incomeFrequencyInput').value = first ? first.frequency : 'weekly';
+  $('#incomeDayOfWeekInput').value = first && first.dayOfWeek !== '' ? first.dayOfWeek : '5';
+  $('#incomeDayOfMonthInput').value = first ? Number(first.dayOfMonth || 1) : 1;
+  $('#incomeEffectiveStartInput').value = first ? first.effectiveStartDate : todayIsoV12();
+  $('#incomeNotesInput').value = first ? first.notes : '';
+  $('#deleteIncomeButton').hidden = !first;
+  $('#incomeDialog').showModal();
+}
+function openIncomeDialogV12() { openIncomeDialogV14(''); }
+async function submitIncomeV12(event) {
+  event.preventDefault();
+  try {
+    const payload = { id: $('#incomeIdInput').value, incomeName: $('#incomeNameInput').value.trim(), amount: parseMoneyValue($('#incomeAmountInput').value), amountBasis: $('#incomeBasisInput').value, frequency: $('#incomeFrequencyInput').value, dayOfWeek: $('#incomeDayOfWeekInput').value, dayOfMonth: $('#incomeDayOfMonthInput').value, effectiveStartDate: $('#incomeEffectiveStartInput').value, notes: $('#incomeNotesInput').value.trim() };
+    const result = await callPost('saveBudgetIncome', payload);
+    state.budgetIncome = (state.budgetIncome || []).filter((row) => row.id !== result.income.id).concat([normaliseBudgetIncomeV12(result.income)]);
+    localStorage.setItem(STORAGE_KEYS.cache, JSON.stringify(getCacheShape()));
+    $('#incomeDialog').close(); renderAll(); showToast('Income schedule saved.');
+  } catch (error) { showToast(error.message); }
+}
+async function deleteIncomeV14() {
+  try {
+    const id = $('#incomeIdInput').value;
+    if (!id) return;
+    await callPost('deleteBudgetIncome', { id });
+    state.budgetIncome = (state.budgetIncome || []).filter((row) => row.id !== id);
+    localStorage.setItem(STORAGE_KEYS.cache, JSON.stringify(getCacheShape()));
+    $('#incomeDialog').close(); renderAll(); showToast('Income schedule deleted.');
+  } catch (error) { showToast(error.message); }
+}
+
+function renderSimpleBudgetsV12() {
+  const list = $('#budgetBucketsList');
+  if (!list) return;
+  const month = getSelectedBudgetMonthV12();
+  const forecast = calculateIncomeForecastV12(month);
+  const lineItems = getPlannedExpensesForMonthV12(month).map((expense) => ({ ...expense, monthlyCalculatedAmount: calculatePlannedExpenseMonthlyAmountV12(expense, month) }));
+  const totalPlanned = sum(lineItems.map((row) => row.monthlyCalculatedAmount));
+  const remaining = forecast.net - totalPlanned;
+  setTextV12('#budgetForecastGross', formatCurrency(forecast.gross));
+  setTextV12('#budgetForecastNet', formatCurrency(forecast.net));
+  setTextV12('#budgetTotalPlanned', formatCurrency(totalPlanned));
+  setTextV12('#budgetRemainingIncome', formatCurrency(remaining));
+  renderIncomeSummaryV12(month, forecast);
+  renderBudgetLineAlertV14(forecast, totalPlanned);
+  list.innerHTML = BUDGET_GROUPS_V13.map((group) => budgetLineGroupHtmlV14(group, lineItems, forecast)).join('');
+  renderDraftIndicatorV13 && renderDraftIndicatorV13();
+  wireBudgetLineItemsV14();
+}
+function renderBudgetLineAlertV14(forecast, totalPlanned) {
+  const alert = $('#budgetAlert');
+  if (!alert) return;
+  const overIncome = totalPlanned - forecast.net;
+  alert.hidden = overIncome <= 0;
+  if (overIncome > 0) alert.textContent = `You have allocated ${formatCurrency(totalPlanned)} against ${formatCurrency(forecast.net)} available. You are over budget by ${formatCurrency(overIncome)}.`;
+}
+function budgetLineGroupHtmlV14(group, lineItems, forecast) {
+  if (group.id === 'gross') return budgetGroupSectionHtmlV13(group, [], forecast);
+  const rows = lineItems.filter((item) => normaliseGroupV13(item.budgetCategory || getExpenseGroupV13(item)) === group.id);
+  const total = sum(rows.map((row) => row.monthlyCalculatedAmount));
+  return `<section class="budget-group-section"><div class="budget-group-heading"><div><h4>${escapeHtml(group.title)}</h4><p>${escapeHtml(group.description)}</p></div><span class="budget-group-total">${formatCurrency(total)}</span></div>${rows.length ? rows.map(budgetLineItemHtmlV14).join('') : '<div class="empty-state">No budget line items in this category.</div>'}<button class="secondary-button add-budget-line-button" data-budget-category="${escapeHtml(group.id)}" type="button">Add Line Item</button></section>`;
+}
+function budgetLineItemHtmlV14(item) {
+  const mode = item.allocationType === 'percentage' ? `${Number(item.amount || 0)}% of ${BUDGET_BASIS_LABELS_V12[item.allocationBasis] || item.allocationBasis}` : formatCurrency(item.amount);
+  const modeClass = item.allocationType === 'percentage' ? 'percent' : '';
+  const freq = item.frequency === 'weekly' ? `Weekly ${weekdayNameV12(item.dayOfWeek)}` : titleCase(item.frequency || 'monthly');
+  return `<article class="budget-line-item-card clickable-card" data-edit-budget-line="${escapeHtml(item.id)}"><div class="budget-line-item-head"><div><h4>${escapeHtml(item.expenseName)}</h4><small>${escapeHtml(freq)} • ${escapeHtml(bucketNameById(item.bucketId))}</small></div><strong>${formatCurrency(item.monthlyCalculatedAmount)}</strong></div><div class="budget-line-meta"><span class="budget-line-pill ${modeClass}">${escapeHtml(mode)}</span><span class="budget-line-pill bucket">Bucket: ${escapeHtml(bucketNameById(item.bucketId))}</span>${item.requiresManualActual ? '<span class="budget-line-pill">Manual actual</span>' : ''}</div></article>`;
+}
+function wireBudgetLineItemsV14() {
+  $$('.add-budget-line-button').forEach((button) => button.addEventListener('click', () => openPlannedExpenseDialogV14('', button.dataset.budgetCategory)));
+  $$('[data-edit-budget-line]').forEach((button) => button.addEventListener('click', () => openPlannedExpenseDialogV14(button.dataset.editBudgetLine)));
+}
+function openPlannedExpenseDialogV14(expenseId, groupId) {
+  const expense = (state.budgetPlannedExpenses || []).find((row) => row.id === expenseId);
+  $('#plannedExpenseIdInput').value = expense ? expense.id : '';
+  $('#plannedExpenseNameInput').value = expense ? expense.expenseName : '';
+  $('#plannedExpenseBudgetCategoryInput').value = expense ? (expense.budgetCategory || getExpenseGroupV13(expense)) : (groupId || 'other');
+  populatePlannedExpenseBucketSelectV12(expense ? expense.bucketId : '');
+  $('#plannedExpenseFrequencyInput').value = expense ? expense.frequency : 'monthly';
+  $('#plannedExpenseDayOfWeekInput').value = expense ? expense.dayOfWeek : '';
+  $('#plannedExpenseAmountInput').value = expense ? Number(expense.amount || 0) : '';
+  $('#plannedExpenseBasisInput').value = expense ? (expense.allocationBasis || 'net_income') : 'net_income';
+  setAllocationTypeV14(expense ? (expense.allocationType || 'fixed') : 'fixed');
+  $('#plannedExpenseStartDateInput').value = expense ? expense.startDate : `${getSelectedBudgetMonthV12()}-01`;
+  $('#plannedExpenseAutoGenerateInput').checked = expense ? expense.autoGenerateTransaction : true;
+  $('#plannedExpenseManualActualInput').checked = expense ? expense.requiresManualActual : false;
+  $('#plannedExpenseNotesInput').value = expense ? expense.notes : '';
+  $('#plannedExpenseDialog').showModal();
+}
+function openPlannedExpenseDialogV12(bucketId, expenseId) { openPlannedExpenseDialogV14(expenseId, getBucketGroupV13(bucketId || 'other')); if (bucketId) $('#plannedExpenseBucketInput').value = bucketId; }
+function setAllocationTypeV14(type) {
+  $('#plannedExpenseAllocationTypeInput').value = type;
+  $$('.allocation-type-button').forEach((button) => button.classList.toggle('active', button.dataset.allocationType === type));
+  const basis = $('#plannedExpenseBasisWrap');
+  if (basis) basis.hidden = type !== 'percentage';
+}
+async function submitPlannedExpenseV12(event) {
+  event.preventDefault();
+  try {
+    const month = getSelectedBudgetMonthV12();
+    const payload = { id: $('#plannedExpenseIdInput').value, budgetMonth: month, expenseName: $('#plannedExpenseNameInput').value.trim(), budgetCategory: $('#plannedExpenseBudgetCategoryInput').value, allocationType: $('#plannedExpenseAllocationTypeInput').value || 'fixed', allocationBasis: $('#plannedExpenseBasisInput').value, bucketId: $('#plannedExpenseBucketInput').value, frequency: $('#plannedExpenseFrequencyInput').value, dayOfWeek: $('#plannedExpenseDayOfWeekInput').value, amount: parseMoneyValue($('#plannedExpenseAmountInput').value), startDate: $('#plannedExpenseStartDateInput').value, autoGenerateTransaction: $('#plannedExpenseAutoGenerateInput').checked, requiresManualActual: $('#plannedExpenseManualActualInput').checked, notes: $('#plannedExpenseNotesInput').value.trim() };
+    const result = await callPost('saveBudgetPlannedExpense', payload);
+    state.budgetPlannedExpenses = (state.budgetPlannedExpenses || []).filter((row) => row.id !== result.expense.id).concat([normalisePlannedExpenseV12(result.expense)]);
+    localStorage.setItem(STORAGE_KEYS.cache, JSON.stringify(getCacheShape()));
+    $('#plannedExpenseDialog').close(); renderAll(); showToast('Budget line item saved.');
+  } catch (error) { showToast(error.message); }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const detailForm = $('#transactionDetailForm');
+  if (detailForm) detailForm.addEventListener('submit', submitTransactionDetailV14);
+  const detailMonth = $('#bucketDetailMonthFilter');
+  if (detailMonth) detailMonth.addEventListener('change', renderBucketDetailV14);
+  $$('[data-back-view]').forEach((button) => button.addEventListener('click', () => switchView(state.previousView || button.dataset.backView || 'dashboard')));
+  const deleteIncome = $('#deleteIncomeButton');
+  if (deleteIncome) deleteIncome.addEventListener('click', deleteIncomeV14);
+  $$('.allocation-type-button').forEach((button) => button.addEventListener('click', () => setAllocationTypeV14(button.dataset.allocationType)));
+});
+
+// --- v15: delete from Transaction Detail and show bucket name in the app header ---
+async function deleteTransactionDetailV15() {
+  try {
+    const id = $('#transactionDetailIdInput') ? $('#transactionDetailIdInput').value : state.selectedTransactionId;
+    if (!id) return showToast('No transaction is selected.');
+    const transaction = state.transactions.find((item) => item.id === id);
+    const label = transaction ? (transaction.description || transaction.merchant || 'this transaction') : 'this transaction';
+    const confirmed = window.confirm(`Delete ${label}? This will remove it from active views but keep the audit trail in Google Sheets.`);
+    if (!confirmed) return;
+    await callPost('deleteTransaction', { id });
+    state.transactions = state.transactions.filter((item) => item.id !== id);
+    localStorage.setItem(STORAGE_KEYS.cache, JSON.stringify(getCacheShape()));
+    renderAll();
+    showToast('Transaction deleted.');
+    switchView(state.previousView || 'transactions');
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function openBucketDetailV14(bucketId) {
+  state.previousView = state.activeView || 'buckets';
+  state.selectedBucketId = bucketId;
+  const monthFilter = $('#bucketDetailMonthFilter');
+  const bucketMonth = $('#bucketMonthFilter');
+  if (monthFilter && bucketMonth) {
+    monthFilter.innerHTML = bucketMonth.innerHTML;
+    monthFilter.value = bucketMonth.value || getSelectedBucketMonth();
+  }
+  renderBucketDetailV14();
+  switchView('bucketDetail');
+  const bucketName = bucketNameById(bucketId);
+  if (elements.viewTitle) elements.viewTitle.textContent = bucketName;
+  const title = $('#bucketDetailTitle');
+  if (title) title.textContent = bucketName;
+}
+
+function renderBucketDetailV14() {
+  const bucketId = state.selectedBucketId;
+  const month = ($('#bucketDetailMonthFilter') && $('#bucketDetailMonthFilter').value) || getSelectedBucketMonth();
+  const all = state.transactions.filter((txn) => effectiveBucketId(txn.bucketId || txn.accountId) === bucketId);
+  const monthTxns = all.filter((txn) => transactionMonth(txn.transactionDate) === month);
+  const balance = sum(all.map((txn) => Number(txn.amount || 0)));
+  const bucketName = bucketNameById(bucketId);
+  if ($('#bucketDetailTitle')) $('#bucketDetailTitle').textContent = bucketName;
+  if (elements.viewTitle && state.activeView === 'bucketDetail') elements.viewTitle.textContent = bucketName;
+  $('#bucketDetailSubtitle').textContent = `Recent activity for ${month}`;
+  $('#bucketDetailBalance').textContent = formatCurrency(balance);
+  $('#bucketDetailMonthChange').textContent = formatCurrency(monthChangeForBucketV14(bucketId, month));
+  $('#bucketDetailFunded').textContent = formatCurrency(sum(monthTxns.filter((txn) => Number(txn.amount) > 0).map((txn) => Number(txn.amount))));
+  $('#bucketDetailSpent').textContent = formatCurrency(sum(monthTxns.filter((txn) => Number(txn.amount) < 0).map((txn) => Math.abs(Number(txn.amount)))));
+  const list = $('#bucketDetailTransactions');
+  list.innerHTML = monthTxns.sort((a,b) => String(b.transactionDate).localeCompare(String(a.transactionDate))).map((txn) => `<article class="mobile-data-card clickable-card" data-open-transaction="${escapeHtml(txn.id)}"><div class="mobile-card-head"><strong>${escapeHtml(txn.description || txn.merchant || 'Transaction')}</strong><span class="${amountClass(txn.amount)}">${formatCurrency(txn.amount)}</span></div><div class="mobile-card-row"><span>Date</span><strong>${escapeHtml(txn.transactionDate)}</strong></div><div class="mobile-card-row"><span>Merchant</span><strong>${escapeHtml(txn.merchant || '—')}</strong></div></article>`).join('') || '<div class="empty-state">No transactions for this bucket in the selected month.</div>';
+  wireDrilldownLinksV14();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const deleteButton = $('#deleteTransactionButton');
+  if (deleteButton) deleteButton.addEventListener('click', deleteTransactionDetailV15);
+});
+
+// --- v16 Home screen: spent vs budget by bucket ---
+function renderCategoryBreakdown(txns) {
+  const container = $('#categoryBreakdown');
+  if (!container) return;
+  const month = getSelectedBucketMonth();
+  const rows = buildSpentVsBudgetRowsV16(month, txns);
+  if (!rows.length) {
+    container.className = 'spent-budget-list empty-state';
+    container.textContent = 'No bucket spending or budget data for the selected month.';
+    return;
+  }
+  container.className = 'spent-budget-list';
+  container.innerHTML = rows.map(spentVsBudgetRowHtmlV16).join('');
+  if (typeof wireDrilldownLinksV14 === 'function') wireDrilldownLinksV14();
+}
+
+function buildSpentVsBudgetRowsV16(month, txns) {
+  const spendingByBucket = new Map();
+  txns.filter((txn) => Number(txn.amount) < 0).forEach((txn) => {
+    const bucketId = effectiveBucketId(txn.bucketId || txn.accountId);
+    spendingByBucket.set(bucketId, (spendingByBucket.get(bucketId) || 0) + Math.abs(Number(txn.amount || 0)));
+  });
+  const bucketRows = activeBucketAccounts().map((account) => {
+    const bucketId = effectiveBucketId(account.bucketId || account.id || account.name);
+    const spent = roundCurrencyV12(spendingByBucket.get(bucketId) || 0);
+    const budget = roundCurrencyV12(homeBudgetAmountForBucketV16(bucketId, month));
+    const percent = budget > 0 ? Math.round((spent / budget) * 100) : (spent > 0 ? 999 : 0);
+    return {
+      bucketId,
+      bucketName: account.name || bucketNameById(bucketId),
+      spent,
+      budget,
+      remaining: roundCurrencyV12(budget - spent),
+      percent,
+      status: spentBudgetStatusV16(percent, budget, spent)
+    };
+  });
+  return bucketRows
+    .filter((row) => row.spent > 0 || row.budget > 0)
+    .sort((a, b) => {
+      const aRatio = a.budget > 0 ? a.spent / a.budget : (a.spent > 0 ? 999 : 0);
+      const bRatio = b.budget > 0 ? b.spent / b.budget : (b.spent > 0 ? 999 : 0);
+      return bRatio - aRatio || b.spent - a.spent || a.bucketName.localeCompare(b.bucketName);
+    });
+}
+
+function homeBudgetAmountForBucketV16(bucketId, month) {
+  const lineItems = getPlannedExpensesForMonthV16(month, bucketId);
+  if (lineItems.length) {
+    return sum(lineItems.map((item) => calculatePlannedExpenseMonthlyAmountV12(item, month)));
+  }
+  const directBudgets = getBudgetRowsForMonthV12(month).filter((budget) => effectiveBucketId(budget.bucketId || budget.categoryId) === bucketId);
+  return sum(directBudgets.map((budget) => Number(budget.plannedAmount || budget.allocationValue || 0)));
+}
+
+function getPlannedExpensesForMonthV16(month, bucketId) {
+  const rows = state.budgetPlannedExpenses || [];
+  const exact = rows.filter((item) => normaliseMonthValue(item.budgetMonth) === month && (!bucketId || effectiveBucketId(item.bucketId) === bucketId));
+  if (exact.length) return exact;
+  const priorMonth = unique(rows.map((item) => normaliseMonthValue(item.budgetMonth)).filter((value) => value && value < month)).sort().pop();
+  return priorMonth ? rows.filter((item) => normaliseMonthValue(item.budgetMonth) === priorMonth && (!bucketId || effectiveBucketId(item.bucketId) === bucketId)).map((item) => ({ ...item, budgetMonth: month })) : [];
+}
+
+function spentBudgetStatusV16(percent, budget, spent) {
+  if (budget <= 0 && spent > 0) return { key: 'over', label: 'No budget set' };
+  if (percent <= 50) return { key: 'low', label: 'Low spend' };
+  if (percent <= 80) return { key: 'medium', label: 'On track' };
+  if (percent <= 100) return { key: 'high', label: 'Near budget' };
+  return { key: 'over', label: 'Over budget' };
+}
+
+function spentVsBudgetRowHtmlV16(row) {
+  const width = row.budget > 0 ? Math.min(100, Math.max(2, row.percent)) : (row.spent > 0 ? 100 : 2);
+  const percentLabel = row.budget > 0 ? `${row.percent}% used` : 'No budget';
+  const remainingClass = row.remaining < 0 ? 'amount-negative' : 'amount-positive';
+  const remainingText = row.budget > 0 ? `${row.remaining < 0 ? 'Over by' : 'Left'} ${formatCurrency(Math.abs(row.remaining))}` : 'Set a budget to compare';
+  return `<button type="button" class="spent-budget-row clickable-card" data-open-bucket="${escapeHtml(row.bucketId)}">
+    <div class="spent-budget-top">
+      <div class="spent-budget-title"><strong>${escapeHtml(row.bucketName)}</strong><small>${escapeHtml(percentLabel)}</small></div>
+      <div class="spent-budget-amounts"><span>${formatCurrency(row.spent)} spent</span><small>of ${row.budget > 0 ? formatCurrency(row.budget) : 'no budget'}</small></div>
+    </div>
+    <div class="spent-budget-track"><div class="spent-budget-fill ${row.status.key}" style="width:${width}%"></div></div>
+    <div class="spent-budget-status"><span class="spent-budget-pill ${row.status.key}">${escapeHtml(row.status.label)}</span><span class="${remainingClass}">${escapeHtml(remainingText)}</span></div>
+  </button>`;
+}

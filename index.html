@@ -57,7 +57,7 @@
         </div>
         <div class="content-grid two-column mobile-stack">
           <article class="panel-card">
-            <div class="card-heading"><h3>Spending by Bucket</h3><span id="categoryMonthLabel"></span></div>
+            <div class="card-heading"><div><h3>Spent vs Budget</h3><p class="card-subtitle">Track each bucket against the amount planned for this month.</p></div><span id="categoryMonthLabel"></span></div>
             <div id="categoryBreakdown" class="breakdown-list empty-state">Load data to view bucket spending.</div>
           </article>
           <article class="panel-card">
@@ -183,6 +183,49 @@
         </article>
       </section>
 
+      <section class="view detail-view" id="bucketDetailView">
+        <article class="panel-card full-width">
+          <div class="card-heading responsive-heading sticky-section-head">
+            <div>
+              <button class="text-button" type="button" data-back-view="buckets">← Back</button>
+              <h3 id="bucketDetailTitle">Bucket</h3>
+              <p class="card-subtitle" id="bucketDetailSubtitle">Recent activity and current balance.</p>
+            </div>
+            <select id="bucketDetailMonthFilter" aria-label="Bucket detail month"></select>
+          </div>
+          <div class="bucket-summary-grid compact-summary">
+            <article class="mini-metric"><span>Current Balance</span><strong id="bucketDetailBalance">$0.00</strong></article>
+            <article class="mini-metric"><span>Previous Month Change</span><strong id="bucketDetailMonthChange">$0.00</strong></article>
+            <article class="mini-metric"><span>Funded This Month</span><strong id="bucketDetailFunded">$0.00</strong></article>
+            <article class="mini-metric"><span>Spent This Month</span><strong id="bucketDetailSpent">$0.00</strong></article>
+          </div>
+          <div class="mobile-card-list" id="bucketDetailTransactions"></div>
+        </article>
+      </section>
+
+      <section class="view detail-view" id="transactionDetailView">
+        <article class="panel-card full-width">
+          <div class="card-heading responsive-heading sticky-section-head">
+            <div>
+              <button class="text-button" type="button" data-back-view="transactions">← Back</button>
+              <h3 id="transactionDetailTitle">Transaction</h3>
+              <p class="card-subtitle">Review or edit transaction details.</p>
+            </div>
+          </div>
+          <form id="transactionDetailForm" class="stacked-form mobile-form">
+            <input id="transactionDetailIdInput" type="hidden" />
+            <label>Date<input id="transactionDetailDateInput" type="date" required /></label>
+            <label>Amount<input id="transactionDetailAmountInput" type="number" step="0.01" required /></label>
+            <label>Merchant<input id="transactionDetailMerchantInput" type="text" /></label>
+            <label>Description<input id="transactionDetailDescriptionInput" type="text" /></label>
+            <label>Category<select id="transactionDetailCategoryInput" required></select></label>
+            <label>Bucket<select id="transactionDetailBucketInput" required></select></label>
+            <label>Notes<textarea id="transactionDetailNotesInput" rows="3"></textarea></label>
+            <div class="transaction-detail-actions"><button class="secondary-button danger-button" id="deleteTransactionButton" type="button">Delete Transaction</button><button class="primary-button full-width-button" type="submit">Save Transaction Changes</button></div>
+          </form>
+        </article>
+      </section>
+
       <section class="view" id="settingsView">
         <article class="panel-card settings-card">
           <div class="card-heading"><div><h3>Backend Settings</h3><p class="card-subtitle">Stored locally in this browser. Do not commit real tokens into GitHub.</p></div></div>
@@ -249,6 +292,7 @@
   <dialog id="incomeDialog">
     <form method="dialog" class="dialog-card" id="incomeForm">
       <div class="dialog-heading"><div><p class="eyebrow">Income schedule</p><h3>Add / Update Income</h3></div><button type="button" class="icon-button" id="closeIncomeDialogButton" aria-label="Close income dialog">×</button></div>
+      <input id="incomeIdInput" type="hidden" />
       <div class="form-grid">
         <label>Income Name<input id="incomeNameInput" type="text" placeholder="Primary Pay" required /></label>
         <label>Amount<input id="incomeAmountInput" type="number" step="0.01" min="0" required placeholder="2045.00" /></label>
@@ -259,7 +303,7 @@
         <label>Effective Start Date<input id="incomeEffectiveStartInput" type="date" required /></label>
         <label class="wide-field">Notes<textarea id="incomeNotesInput" rows="3" placeholder="Optional notes"></textarea></label>
       </div>
-      <div class="dialog-actions"><button type="button" class="secondary-button" id="cancelIncomeButton">Cancel</button><button type="submit" class="primary-button">Save Income</button></div>
+      <div class="dialog-actions"><button type="button" class="secondary-button danger-button" id="deleteIncomeButton">Delete Income</button><button type="button" class="secondary-button" id="cancelIncomeButton">Cancel</button><button type="submit" class="primary-button">Save Income</button></div>
     </form>
   </dialog>
 
@@ -267,12 +311,16 @@
     <form method="dialog" class="dialog-card" id="plannedExpenseForm">
       <div class="dialog-heading"><div><p class="eyebrow">Planned expense</p><h3>Add Planned Expense</h3></div><button type="button" class="icon-button" id="closePlannedExpenseDialogButton" aria-label="Close planned expense dialog">×</button></div>
       <input id="plannedExpenseIdInput" type="hidden" />
+      <input id="plannedExpenseAllocationTypeInput" type="hidden" value="fixed" />
       <div class="form-grid">
-        <label>Expense Name<input id="plannedExpenseNameInput" type="text" placeholder="Car Payment" required /></label>
+        <label>Line Item Name<input id="plannedExpenseNameInput" type="text" placeholder="Car Payment" required /></label>
+        <label>Budget Category<select id="plannedExpenseBudgetCategoryInput"><option value="take_home">Take-Home</option><option value="fixed_expenses">Fixed Expenses</option><option value="savings">Savings</option><option value="necessities">Necessities</option><option value="other">Other</option></select></label>
         <label>Bucket<select id="plannedExpenseBucketInput" required></select></label>
+        <div class="allocation-toggle-field"><span>Amount Type</span><div class="allocation-toggle" role="group" aria-label="Amount type"><button type="button" class="allocation-type-button active" data-allocation-type="fixed">$</button><button type="button" class="allocation-type-button" data-allocation-type="percentage">%</button></div></div>
         <label>Frequency<select id="plannedExpenseFrequencyInput"><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="custom">Custom once this month</option></select></label>
         <label>Weekday<select id="plannedExpenseDayOfWeekInput"><option value="">Only for weekly</option><option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option></select></label>
-        <label>Amount<input id="plannedExpenseAmountInput" type="number" min="0" step="0.01" required placeholder="329.09" /></label>
+        <label>Amount / Percent<input id="plannedExpenseAmountInput" type="number" min="0" step="0.01" required placeholder="329.09" /></label>
+        <label id="plannedExpenseBasisWrap">Percentage Basis<select id="plannedExpenseBasisInput"><option value="gross_income">Gross income</option><option value="net_income">Net income</option><option value="after_taxes">After taxes</option><option value="after_401k">After 401K</option><option value="after_fixed_expenses">After fixed expenses</option><option value="remaining_income">Remaining available</option></select></label>
         <label>Start Date<input id="plannedExpenseStartDateInput" type="date" /></label>
         <label class="checkbox-label"><input id="plannedExpenseAutoGenerateInput" type="checkbox" checked /> Auto-generate allocation transaction</label>
         <label class="checkbox-label"><input id="plannedExpenseManualActualInput" type="checkbox" /> Manual actual required</label>

@@ -854,3 +854,203 @@ function normalBoolV12_(value) {
   const text = String(value || '').toLowerCase().trim();
   return text === 'true' || text === 'yes' || text === '1';
 }
+
+// --- v14 drill-down support: update transactions, delete income, and budget line item fields ---
+function doPost(e) {
+  try {
+    const body = parseBody_(e);
+    validateToken_(body.token);
+    const action = body.action;
+    const payload = body.payload || {};
+    if (action === 'bootstrap') return json_(bootstrap_());
+    if (action === 'createTransaction') return json_(createTransaction_(payload));
+    if (action === 'updateTransaction') return json_(updateTransaction_(payload));
+    if (action === 'createBucketTransfer') return json_(createBucketTransfer_(payload));
+    if (action === 'retireBucket') return json_(retireBucket_(payload));
+    if (action === 'saveBudgetPlan') return json_(saveBudgetPlan_(payload));
+    if (action === 'saveDetailedBudgetPlan') return json_(saveDetailedBudgetPlan_(payload));
+    if (action === 'saveSimplifiedBudgetPlan') return json_(saveSimplifiedBudgetPlan_(payload));
+    if (action === 'saveBudgetIncome') return json_(saveBudgetIncome_(payload));
+    if (action === 'deleteBudgetIncome') return json_(deleteBudgetIncome_(payload));
+    if (action === 'saveBudgetPlannedExpense') return json_(saveBudgetPlannedExpense_(payload));
+    if (action === 'deleteBudgetPlannedExpense') return json_(deleteBudgetPlannedExpense_(payload));
+    if (action === 'generatePlannedTransactions') return json_(generatePlannedTransactions_(payload));
+    return json_({ ok: false, error: 'Unknown POST action: ' + action });
+  } catch (error) {
+    return error_(error);
+  }
+}
+
+function updateTransaction_(payload) {
+  if (!payload.id) throw new Error('Transaction id is required.');
+  const found = findByField_(SHEETS.TRANSACTIONS, 'id', payload.id);
+  if (!found) throw new Error('Could not find transaction: ' + payload.id);
+  const before = found.object;
+  const bucketId = normalBucketId_(payload.bucketId || payload.accountId || before.bucketId || before.accountId);
+  const after = Object.assign({}, before, {
+    transactionDate: payload.transactionDate || before.transactionDate || today_(),
+    description: payload.description === undefined ? before.description : payload.description,
+    merchant: payload.merchant === undefined ? before.merchant : payload.merchant,
+    amount: money_(payload.amount),
+    transactionType: payload.transactionType || before.transactionType || (money_(payload.amount) < 0 ? 'expense' : money_(payload.amount) > 0 ? 'allocation' : 'adjustment'),
+    bucketId: bucketId,
+    categoryId: payload.categoryId || 'cat_' + bucketId,
+    accountId: payload.accountId || 'acct_' + bucketId,
+    sourceBucket: payload.sourceBucket || bucketName_(bucketId),
+    notes: payload.notes === undefined ? before.notes : payload.notes,
+    updatedAt: now_()
+  });
+  writeObjectToRow_(SHEETS.TRANSACTIONS, found.rowNumber, after);
+  refreshBucketBalances_();
+  audit_('update', 'transaction', payload.id, before, after);
+  return { ok: true, transaction: after };
+}
+
+function deleteBudgetIncome_(payload) {
+  const id = payload.id;
+  if (!id) throw new Error('Income id is required.');
+  const kept = readObjects_(V12_SHEETS.BUDGET_INCOME).filter(function(row) { return row.id !== id; });
+  clearAndWriteWithHeadersV12_(V12_SHEETS.BUDGET_INCOME, V12_HEADERS.BudgetIncome, kept);
+  audit_('delete', 'budgetIncome', id, '', '');
+  return { ok: true, deletedId: id };
+}
+
+function saveBudgetPlannedExpense_(payload) {
+  ensureV12Sheets_();
+  const month = normalMonthV12_(payload.budgetMonth || today_().slice(0, 7));
+  const bucketId = normalBucketId_(payload.bucketId);
+  const now = now_();
+  const expense = {
+    id: payload.id || id_('planned_expense'),
+    budgetMonth: month,
+    bucketId: bucketId,
+    expenseName: payload.expenseName || 'Planned Expense',
+    budgetCategory: payload.budgetCategory || 'other',
+    allocationType: payload.allocationType || 'fixed',
+    allocationBasis: payload.allocationBasis || 'net_income',
+    frequency: payload.frequency || 'monthly',
+    dayOfWeek: payload.dayOfWeek === undefined ? '' : String(payload.dayOfWeek),
+    amount: money_(payload.amount),
+    monthlyCalculatedAmount: calculatePlannedExpenseMonthlyAmountV14_(payload, month),
+    autoGenerateTransaction: payload.autoGenerateTransaction === undefined ? true : payload.autoGenerateTransaction,
+    requiresManualActual: payload.requiresManualActual === true || String(payload.requiresManualActual).toLowerCase() === 'true',
+    startDate: payload.startDate || month + '-01',
+    endDate: payload.endDate || '',
+    notes: payload.notes || '',
+    createdAt: payload.createdAt || now,
+    updatedAt: now
+  };
+  const existing = readObjects_(V12_SHEETS.BUDGET_PLANNED_EXPENSES).filter(function(row) { return row.id !== expense.id; });
+  const headers = ['id','budgetMonth','bucketId','expenseName','budgetCategory','allocationType','allocationBasis','frequency','dayOfWeek','amount','monthlyCalculatedAmount','autoGenerateTransaction','requiresManualActual','startDate','endDate','notes','createdAt','updatedAt'];
+  clearAndWriteWithHeadersV12_(V12_SHEETS.BUDGET_PLANNED_EXPENSES, headers, existing.concat([expense]));
+  audit_('save', 'budgetPlannedExpense', expense.id, '', expense);
+  return { ok: true, expense: expense };
+}
+
+function calculatePlannedExpenseMonthlyAmountV14_(expense, month) {
+  const amount = money_(expense.amount);
+  if (expense.frequency === 'weekly') return Math.round(amount * countWeekdayInMonthV12_(month, Number(expense.dayOfWeek || 0)) * 100) / 100;
+  return Math.round(amount * 100) / 100;
+}
+
+// v14 percentage line-item calculation support for server-generated planned transactions.
+function calculatePlannedExpenseMonthlyAmountV14_(expense, month) {
+  let amount = money_(expense.amount);
+  if ((expense.allocationType || 'fixed') === 'percentage') {
+    const forecast = incomeForecastV14_(month);
+    amount = basisAmountV14_(expense.allocationBasis || 'net_income', forecast) * (money_(expense.amount) / 100);
+  }
+  if (expense.frequency === 'weekly') return Math.round(amount * countWeekdayInMonthV12_(month, Number(expense.dayOfWeek || 0)) * 100) / 100;
+  return Math.round(amount * 100) / 100;
+}
+
+function incomeForecastV14_(month) {
+  const schedules = readObjects_(V12_SHEETS.BUDGET_INCOME).filter(function(row) {
+    return row.isActive !== false && String(row.isActive).toLowerCase() !== 'false' && incomeRelevantV14_(row, month);
+  });
+  let gross = 0;
+  let net = 0;
+  schedules.forEach(function(row) {
+    const amount = incomeAmountForMonthV14_(row, month);
+    if (row.amountBasis === 'gross') gross += amount;
+    else net += amount;
+  });
+  if (!gross && net) gross = net;
+  if (!net && gross) net = gross;
+  return { gross: gross, net: net };
+}
+
+function incomeRelevantV14_(row, month) {
+  const start = new Date(month + '-01T00:00:00');
+  const end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+  const effStart = row.effectiveStartDate ? new Date(normalDateV12_(row.effectiveStartDate) + 'T00:00:00') : start;
+  const effEnd = row.effectiveEndDate ? new Date(normalDateV12_(row.effectiveEndDate) + 'T00:00:00') : null;
+  return effStart <= end && (!effEnd || effEnd >= start);
+}
+
+function incomeAmountForMonthV14_(row, month) {
+  const amount = money_(row.amount);
+  if (row.frequency === 'monthly') return amount;
+  if (row.frequency === 'weekly') return amount * countWeekdayInMonthV12_(month, Number(row.dayOfWeek || 0));
+  if (row.frequency === 'biweekly') return amount * countBiweeklyDatesInMonthV14_(month, row.effectiveStartDate || (month + '-01'));
+  return amount;
+}
+
+function countBiweeklyDatesInMonthV14_(month, anchorDateText) {
+  const start = new Date(month + '-01T00:00:00');
+  const last = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+  let anchor = new Date(normalDateV12_(anchorDateText) + 'T00:00:00');
+  while (anchor > start) anchor.setDate(anchor.getDate() - 14);
+  let count = 0;
+  for (let d = new Date(anchor); d <= last; d.setDate(d.getDate() + 14)) {
+    if (d >= start && d <= last) count += 1;
+  }
+  return count;
+}
+
+function basisAmountV14_(basis, forecast) {
+  if (basis === 'gross_income') return forecast.gross || 0;
+  return forecast.net || forecast.gross || 0;
+}
+
+// --- v15 transaction soft-delete support ---
+function doPost(e) {
+  try {
+    const body = parseBody_(e);
+    validateToken_(body.token);
+    const action = body.action;
+    const payload = body.payload || {};
+    if (action === 'bootstrap') return json_(bootstrap_());
+    if (action === 'createTransaction') return json_(createTransaction_(payload));
+    if (action === 'updateTransaction') return json_(updateTransaction_(payload));
+    if (action === 'deleteTransaction') return json_(deleteTransaction_(payload));
+    if (action === 'createBucketTransfer') return json_(createBucketTransfer_(payload));
+    if (action === 'retireBucket') return json_(retireBucket_(payload));
+    if (action === 'saveBudgetPlan') return json_(saveBudgetPlan_(payload));
+    if (action === 'saveDetailedBudgetPlan') return json_(saveDetailedBudgetPlan_(payload));
+    if (action === 'saveSimplifiedBudgetPlan') return json_(saveSimplifiedBudgetPlan_(payload));
+    if (action === 'saveBudgetIncome') return json_(saveBudgetIncome_(payload));
+    if (action === 'deleteBudgetIncome') return json_(deleteBudgetIncome_(payload));
+    if (action === 'saveBudgetPlannedExpense') return json_(saveBudgetPlannedExpense_(payload));
+    if (action === 'deleteBudgetPlannedExpense') return json_(deleteBudgetPlannedExpense_(payload));
+    if (action === 'generatePlannedTransactions') return json_(generatePlannedTransactions_(payload));
+    return json_({ ok: false, error: 'Unknown POST action: ' + action });
+  } catch (error) {
+    return error_(error);
+  }
+}
+
+function deleteTransaction_(payload) {
+  if (!payload.id) throw new Error('Transaction id is required.');
+  const found = findByField_(SHEETS.TRANSACTIONS, 'id', payload.id);
+  if (!found) throw new Error('Could not find transaction: ' + payload.id);
+  const before = found.object;
+  const after = Object.assign({}, before, {
+    deletedAt: now_(),
+    updatedAt: now_()
+  });
+  writeObjectToRow_(SHEETS.TRANSACTIONS, found.rowNumber, after);
+  refreshBucketBalances_();
+  audit_('delete', 'transaction', payload.id, before, after);
+  return { ok: true, deletedId: payload.id, transaction: after };
+}
