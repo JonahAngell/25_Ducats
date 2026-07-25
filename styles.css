@@ -208,3 +208,29 @@ label { display:grid; gap:7px; color:var(--muted); font-weight:800; }
   .budget-line-actions { justify-content:stretch; }
   .budget-line-actions > * { flex:1; }
 }
+
+/* v12 simplified budget planner */
+.budgeting-v12 { display:grid; gap:16px; }
+.budget-section-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.budget-income-card, .budget-bucket-card { background:#fff; border:1px solid var(--line); border-radius:22px; padding:16px; box-shadow:0 10px 28px rgba(28,43,70,.07); }
+.budget-income-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.budget-income-pill,.budget-bucket-metric { background:var(--panel-soft); border:1px solid var(--line); border-radius:16px; padding:12px; }
+.budget-income-pill span,.budget-bucket-metric span { color:var(--muted); font-size:.72rem; font-weight:900; text-transform:uppercase; letter-spacing:.05em; }
+.budget-income-pill strong,.budget-bucket-metric strong { display:block; margin-top:5px; }
+.budget-alert { border-radius:18px; padding:14px 16px; border:1px solid #f2b8b5; background:#fff0ef; color:#9b241c; font-weight:800; }
+.budget-bucket-card { display:grid; gap:13px; }
+.budget-bucket-card.over { border-color:#f2b8b5; }
+.budget-bucket-head,.budget-progress-label { display:flex; justify-content:space-between; gap:12px; }
+.budget-bucket-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.budget-bucket-edit { display:grid; grid-template-columns:105px minmax(0,1fr) minmax(0,1fr); gap:10px; align-items:end; }
+.planned-expense-list { display:grid; gap:8px; }
+.planned-expense-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; background:var(--panel-soft); border:1px solid var(--line); border-radius:15px; padding:11px 12px; }
+.planned-expense-row small { color:var(--muted); display:block; margin-top:2px; }
+.budget-bucket-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.budget-chip { display:inline-flex; border-radius:999px; padding:5px 9px; font-size:.74rem; font-weight:900; background:var(--primary-soft); color:var(--primary); }
+.budget-chip.warning { background:#fff4d2; color:#8a5b00; }
+.budget-chip.danger { background:#ffe9e7; color:#b42318; }
+@media (max-width:760px){.budget-income-summary,.budget-bucket-metrics,.budget-bucket-edit{grid-template-columns:1fr}.planned-expense-row{grid-template-columns:1fr}.budget-section-heading,.budget-bucket-head{flex-direction:column;align-items:stretch}}
+
+/* v13 budget order, draft saves, and spending mode polish */
+.budget-draft-note{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:6px 10px;font-size:.76rem;font-weight:900;background:#fff4d2;color:#8a5b00}.budget-group-section{display:grid;gap:10px;margin-bottom:18px}.budget-group-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 2px}.budget-group-heading h4{margin:0;font-size:1.05rem}.budget-group-heading p{margin:3px 0 0;color:var(--muted);font-size:.82rem}.budget-group-total{font-weight:900;color:var(--primary);white-space:nowrap}.budget-bucket-card.budget-group-gross{border-color:#b7d8ff;background:linear-gradient(180deg,#fff,#f7fbff)}.budget-bucket-card.budget-group-take_home{border-color:#f3db9b;background:linear-gradient(180deg,#fff,#fffaf0)}.budget-bucket-card.budget-group-fixed_expenses{border-color:#f5c2bc}.budget-bucket-card.budget-group-savings{border-color:#bdebd2}.budget-bucket-card.budget-group-necessities{border-color:#c9defb}.budget-bucket-card.budget-group-other{border-color:#ded7fb}.budget-mode-pill{display:inline-flex;align-items:center;gap:7px;padding:6px 10px;border-radius:999px;font-size:.75rem;font-weight:900}.budget-mode-fixed{background:#e8efff;color:#2251d1}.budget-mode-percentage{background:#e9f8ef;color:#087443}.budget-bucket-edit.fixed-mode .budget-allocation-basis-wrap{opacity:.45}.budget-bucket-edit.percentage-mode .budget-allocation-value-wrap label::after{content:' %'}.planned-expense-row .expense-group-tag{margin-top:4px;display:inline-flex;border-radius:999px;padding:3px 7px;background:#eef2ff;color:#2942a8;font-weight:800;font-size:.68rem}.budget-layout-editor{display:grid;gap:12px;max-height:min(62vh,620px);overflow:auto;padding-right:4px}.budget-layout-row{display:grid;grid-template-columns:1fr minmax(160px,230px);gap:10px;align-items:center;border:1px solid var(--line);background:var(--panel-soft);border-radius:16px;padding:12px}.budget-layout-row strong{display:block}.budget-layout-row small{color:var(--muted);display:block;margin-top:2px}.budget-layout-row.expense{margin-left:18px;border-style:dashed}@media(max-width:760px){.budget-group-heading,.budget-layout-row{grid-template-columns:1fr;display:grid}.budget-layout-row.expense{margin-left:0}.budget-layout-editor{max-height:70vh}}

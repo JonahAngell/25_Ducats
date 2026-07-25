@@ -144,31 +144,42 @@
       </section>
 
       <section class="view" id="budgetsView">
-        <article class="panel-card full-width budget-planner-card">
+        <article class="panel-card full-width budget-planner-card budgeting-v12">
           <div class="card-heading responsive-heading sticky-section-head">
-            <div><h3>Budget Planner</h3><p class="card-subtitle">Month-by-month budget lines with fixed, percentage, subtotal, and total rows.</p></div>
+            <div>
+              <h3>Budgets</h3>
+              <p class="card-subtitle">Set income, monthly bucket budgets, and planned expenses without spreadsheet-style formula rows.</p>
+            </div>
             <div class="filter-row budget-builder-actions">
               <select id="budgetMonthFilter" aria-label="Budget month"></select>
               <button class="secondary-button" id="copyPreviousBudgetButton" type="button">Copy Previous</button>
-              <button class="secondary-button" id="addBudgetLineButton" type="button">Add Line</button>
-              <button class="primary-button" id="saveBudgetPlanButton" type="button">Save</button>
+              <button class="secondary-button" id="generatePlannedTransactionsButton" type="button">Generate Allocations</button>
+              <button class="secondary-button" id="openBudgetLayoutButton" type="button">Organise</button>
+              <button class="primary-button" id="saveBudgetPlanButton" type="button">Save Budget</button>
             </div>
           </div>
+
+          <section class="budget-income-card">
+            <div class="budget-section-heading">
+              <div>
+                <p class="eyebrow">Income forecast</p>
+                <h4>Where this month’s money comes from</h4>
+              </div>
+              <button class="secondary-button" id="addIncomeScheduleButton" type="button">Add / Update Income</button>
+            </div>
+            <div class="budget-income-summary" id="budgetIncomeSummary"></div>
+          </section>
+
+          <div class="budget-alert" id="budgetAlert" hidden></div>
+
           <div class="bucket-summary-grid compact-summary budget-summary-grid">
-            <article class="mini-metric"><span>Budget Pay</span><strong id="plannerBudgetPay">$0.00</strong></article>
-            <article class="mini-metric"><span>Actual Pay</span><strong id="plannerActualPay">$0.00</strong></article>
-            <article class="mini-metric"><span>Remaining</span><strong id="plannerRemainingBudget">$0.00</strong></article>
-            <article class="mini-metric"><span>Variance</span><strong id="plannerTotalVariance">$0.00</strong></article>
+            <article class="mini-metric"><span>Forecast Gross</span><strong id="budgetForecastGross">$0.00</strong></article>
+            <article class="mini-metric"><span>Forecast Net</span><strong id="budgetForecastNet">$0.00</strong></article>
+            <article class="mini-metric"><span>Budgeted</span><strong id="budgetTotalPlanned">$0.00</strong></article>
+            <article class="mini-metric"><span>Remaining</span><strong id="budgetRemainingIncome">$0.00</strong></article>
           </div>
-          <div class="budget-planner-toolbar mobile-form-inline">
-            <label>Selected Month<input id="budgetPlannerMonthInput" type="month" /></label>
-            <label>Notes<input id="budgetPlannerNotesInput" type="text" placeholder="Optional monthly notes" /></label>
-          </div>
-          <div class="budget-planner-layout">
-            <details class="budget-planner-help"><summary>How this planner works</summary><ul><li><strong>Fixed</strong> lines multiply Value × Count.</li><li><strong>Percentage</strong> lines use the chosen Basis.</li><li><strong>Subtotal</strong> and <strong>Total</strong> capture the running remaining amount.</li></ul></details>
-            <div class="budget-card-list" id="budgetPlannerCardList"></div>
-            <div id="budgetPlannerTableBody" hidden></div>
-          </div>
+
+          <div class="budget-card-list" id="budgetBucketsList"></div>
         </article>
       </section>
 
@@ -234,6 +245,63 @@
       <div class="dialog-actions"><button type="button" class="secondary-button" id="cancelTransactionButton">Cancel</button><button type="submit" class="primary-button">Save Transaction</button></div>
     </form>
   </dialog>
+
+  <dialog id="incomeDialog">
+    <form method="dialog" class="dialog-card" id="incomeForm">
+      <div class="dialog-heading"><div><p class="eyebrow">Income schedule</p><h3>Add / Update Income</h3></div><button type="button" class="icon-button" id="closeIncomeDialogButton" aria-label="Close income dialog">×</button></div>
+      <div class="form-grid">
+        <label>Income Name<input id="incomeNameInput" type="text" placeholder="Primary Pay" required /></label>
+        <label>Amount<input id="incomeAmountInput" type="number" step="0.01" min="0" required placeholder="2045.00" /></label>
+        <label>Amount Basis<select id="incomeBasisInput"><option value="gross">Gross</option><option value="net">Net</option></select></label>
+        <label>Frequency<select id="incomeFrequencyInput"><option value="weekly">Weekly</option><option value="biweekly">Biweekly</option><option value="monthly">Monthly</option></select></label>
+        <label>Pay Day<select id="incomeDayOfWeekInput"><option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option></select></label>
+        <label>Monthly Pay Date<input id="incomeDayOfMonthInput" type="number" min="1" max="31" value="1" /></label>
+        <label>Effective Start Date<input id="incomeEffectiveStartInput" type="date" required /></label>
+        <label class="wide-field">Notes<textarea id="incomeNotesInput" rows="3" placeholder="Optional notes"></textarea></label>
+      </div>
+      <div class="dialog-actions"><button type="button" class="secondary-button" id="cancelIncomeButton">Cancel</button><button type="submit" class="primary-button">Save Income</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="plannedExpenseDialog">
+    <form method="dialog" class="dialog-card" id="plannedExpenseForm">
+      <div class="dialog-heading"><div><p class="eyebrow">Planned expense</p><h3>Add Planned Expense</h3></div><button type="button" class="icon-button" id="closePlannedExpenseDialogButton" aria-label="Close planned expense dialog">×</button></div>
+      <input id="plannedExpenseIdInput" type="hidden" />
+      <div class="form-grid">
+        <label>Expense Name<input id="plannedExpenseNameInput" type="text" placeholder="Car Payment" required /></label>
+        <label>Bucket<select id="plannedExpenseBucketInput" required></select></label>
+        <label>Frequency<select id="plannedExpenseFrequencyInput"><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="custom">Custom once this month</option></select></label>
+        <label>Weekday<select id="plannedExpenseDayOfWeekInput"><option value="">Only for weekly</option><option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option></select></label>
+        <label>Amount<input id="plannedExpenseAmountInput" type="number" min="0" step="0.01" required placeholder="329.09" /></label>
+        <label>Start Date<input id="plannedExpenseStartDateInput" type="date" /></label>
+        <label class="checkbox-label"><input id="plannedExpenseAutoGenerateInput" type="checkbox" checked /> Auto-generate allocation transaction</label>
+        <label class="checkbox-label"><input id="plannedExpenseManualActualInput" type="checkbox" /> Manual actual required</label>
+        <label class="wide-field">Notes<textarea id="plannedExpenseNotesInput" rows="3" placeholder="Optional notes"></textarea></label>
+      </div>
+      <div class="dialog-actions"><button type="button" class="secondary-button" id="cancelPlannedExpenseButton">Cancel</button><button type="submit" class="primary-button">Save Planned Expense</button></div>
+    </form>
+  </dialog>
+
+
+  <dialog id="budgetLayoutDialog">
+    <form method="dialog" class="dialog-card" id="budgetLayoutForm">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">Budget layout</p>
+          <h3>Organise Budget Categories</h3>
+          <p class="card-subtitle">Move buckets or planned expense rows between Gross, Take-Home, Fixed Expenses, Savings, Necessities, and Other.</p>
+        </div>
+        <button type="button" class="icon-button" id="closeBudgetLayoutDialogButton" aria-label="Close budget layout dialog">×</button>
+      </div>
+      <div class="budget-layout-editor" id="budgetLayoutEditor"></div>
+      <div class="dialog-actions">
+        <button type="button" class="secondary-button" id="resetBudgetLayoutButton">Reset Default</button>
+        <button type="button" class="secondary-button" id="cancelBudgetLayoutButton">Cancel</button>
+        <button type="submit" class="primary-button">Apply Layout</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
 </body>

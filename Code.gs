@@ -550,3 +550,307 @@ function clearAndWriteBudgetPlansV7_(rows) {
 function normalBudgetLineIdV7_(label) {
   return String(label || 'line').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
+
+// --- v12 simplified budget backend with supporting tables ---
+const V12_SHEETS = {
+  BUDGET_INCOME: 'BudgetIncome',
+  BUDGET_PLANNED_EXPENSES: 'BudgetPlannedExpenses',
+  BUDGET_GENERATED_TRANSACTIONS: 'BudgetGeneratedTransactions'
+};
+const V12_HEADERS = {
+  BudgetIncome: ['id','incomeName','amount','amountBasis','frequency','dayOfWeek','dayOfMonth','effectiveStartDate','effectiveEndDate','isActive','notes','createdAt','updatedAt'],
+  BudgetPlannedExpenses: ['id','budgetMonth','bucketId','expenseName','frequency','dayOfWeek','amount','monthlyCalculatedAmount','autoGenerateTransaction','requiresManualActual','startDate','endDate','notes','createdAt','updatedAt'],
+  BudgetGeneratedTransactions: ['id','sourceExpenseId','budgetMonth','transactionDate','bucketId','amount','status','createdTransactionId','notes','createdAt','updatedAt'],
+  BudgetsV12: ['id','budgetMonth','bucketId','categoryId','allocationType','allocationValue','allocationBasis','plannedAmount','actualAmount','remainingAmount','notes','createdAt','updatedAt']
+};
+
+function doGet(e) {
+  try {
+    const action = queryParam_(e, 'action') || 'health';
+    if (action === 'health') return json_({ ok: true, message: 'Budget API v12 simplified budgets', supportedPostActions: ['bootstrap','createTransaction','createBucketTransfer','retireBucket','saveBudgetPlan','saveSimplifiedBudgetPlan','saveBudgetIncome','saveBudgetPlannedExpense','generatePlannedTransactions'], timestamp: now_() });
+    if (action === 'actions') return json_({ ok: true, version: 'Budget API v12 simplified budgets', supportedPostActions: ['bootstrap','createTransaction','createBucketTransfer','retireBucket','saveBudgetPlan','saveSimplifiedBudgetPlan','saveBudgetIncome','saveBudgetPlannedExpense','generatePlannedTransactions'], timestamp: now_() });
+    validateToken_(queryParam_(e, 'token'));
+    if (action === 'bootstrap') return json_(bootstrap_());
+    return json_({ ok: false, error: 'Unknown GET action: ' + action, supportedGetActions: ['health','actions','bootstrap'] });
+  } catch (error) {
+    return error_(error);
+  }
+}
+
+function doPost(e) {
+  try {
+    const body = parseBody_(e);
+    validateToken_(body.token);
+    const action = body.action;
+    const payload = body.payload || {};
+    if (action === 'bootstrap') return json_(bootstrap_());
+    if (action === 'createTransaction') return json_(createTransaction_(payload));
+    if (action === 'createBucketTransfer') return json_(createBucketTransfer_(payload));
+    if (action === 'retireBucket') return json_(retireBucket_(payload));
+    if (action === 'saveBudgetPlan') return json_(saveBudgetPlan_(payload));
+    if (action === 'saveSimplifiedBudgetPlan') return json_(saveSimplifiedBudgetPlan_(payload));
+    if (action === 'saveBudgetIncome') return json_(saveBudgetIncome_(payload));
+    if (action === 'saveBudgetPlannedExpense') return json_(saveBudgetPlannedExpense_(payload));
+    if (action === 'deleteBudgetPlannedExpense') return json_(deleteBudgetPlannedExpense_(payload));
+    if (action === 'generatePlannedTransactions') return json_(generatePlannedTransactions_(payload));
+    return json_({ ok: false, error: 'Unknown POST action: ' + action });
+  } catch (error) {
+    return error_(error);
+  }
+}
+
+function setupBudgetWorkbook() {
+  ensureCoreSheets_();
+  ensureV12Sheets_();
+  return { ok: true, message: 'Workbook setup complete, including v12 budget support sheets.', timestamp: now_() };
+}
+
+function bootstrap_() {
+  ensureCoreSheets_();
+  ensureV12Sheets_();
+  refreshBucketBalances_();
+  return {
+    ok: true,
+    data: {
+      transactions: readObjects_(SHEETS.TRANSACTIONS).filter(function(row) { return !row.deletedAt; }),
+      categories: readObjects_(SHEETS.CATEGORIES),
+      accounts: readObjects_(SHEETS.ACCOUNTS),
+      budgets: readObjects_(SHEETS.BUDGETS),
+      budgetIncome: readObjects_(V12_SHEETS.BUDGET_INCOME),
+      budgetPlannedExpenses: readObjects_(V12_SHEETS.BUDGET_PLANNED_EXPENSES),
+      budgetGeneratedTransactions: readObjects_(V12_SHEETS.BUDGET_GENERATED_TRANSACTIONS),
+      bucketAliases: readObjects_(SHEETS.BUCKET_ALIASES),
+      bucketTransfers: readObjects_(SHEETS.BUCKET_TRANSFERS).filter(function(row) { return !row.deletedAt; }),
+      bucketBalances: readObjects_(SHEETS.BUCKET_BALANCES),
+      incomeHistory: readObjects_(SHEETS.INCOME_HISTORY),
+      settings: readSettings_()
+    },
+    timestamp: now_()
+  };
+}
+
+function ensureV12Sheets_() {
+  ensureSheetWithHeadersV12_(V12_SHEETS.BUDGET_INCOME, V12_HEADERS.BudgetIncome);
+  ensureSheetWithHeadersV12_(V12_SHEETS.BUDGET_PLANNED_EXPENSES, V12_HEADERS.BudgetPlannedExpenses);
+  ensureSheetWithHeadersV12_(V12_SHEETS.BUDGET_GENERATED_TRANSACTIONS, V12_HEADERS.BudgetGeneratedTransactions);
+}
+
+function ensureSheetWithHeadersV12_(sheetName, headers) {
+  let sheet = spreadsheet_().getSheetByName(sheetName);
+  if (!sheet) sheet = spreadsheet_().insertSheet(sheetName);
+  if (sheet.getLastRow() === 0 || sheet.getLastColumn() === 0) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.setFrozenRows(1);
+  }
+}
+
+function saveSimplifiedBudgetPlan_(payload) {
+  const month = normalMonthV12_(payload.budgetMonth);
+  if (!month) throw new Error('A budget month is required.');
+  const rows = payload.rows || [];
+  const existing = readObjects_(SHEETS.BUDGETS);
+  const kept = existing.filter(function(row) { return normalMonthV12_(row.budgetMonth) !== month; });
+  const now = now_();
+  const saved = rows.map(function(row) {
+    const bucketId = normalBucketId_(row.bucketId || row.categoryId);
+    const allocationType = row.allocationType || 'fixed';
+    const allocationValue = money_(row.allocationValue);
+    const plannedAmount = money_(row.plannedAmount);
+    return {
+      id: row.id || 'budget_' + month.replace('-', '_') + '_' + bucketId,
+      budgetMonth: month,
+      bucketId: bucketId,
+      categoryId: row.categoryId || 'cat_' + bucketId,
+      allocationType: allocationType,
+      allocationValue: allocationValue,
+      allocationBasis: row.allocationBasis || 'net_income',
+      plannedAmount: plannedAmount,
+      actualAmount: money_(row.actualAmount),
+      remainingAmount: money_(row.remainingAmount),
+      notes: row.notes || '',
+      createdAt: row.createdAt || now,
+      updatedAt: now
+    };
+  });
+  clearAndWriteWithHeadersV12_(SHEETS.BUDGETS, V12_HEADERS.BudgetsV12, kept.concat(saved));
+  audit_('save', 'simplifiedBudgetPlan', month, '', saved);
+  return { ok: true, budgets: saved };
+}
+
+function saveBudgetIncome_(payload) {
+  ensureV12Sheets_();
+  const now = now_();
+  const newStart = normalDateV12_(payload.effectiveStartDate || today_());
+  const income = {
+    id: payload.id || id_('income'),
+    incomeName: payload.incomeName || 'Income',
+    amount: money_(payload.amount),
+    amountBasis: payload.amountBasis || 'net',
+    frequency: payload.frequency || 'weekly',
+    dayOfWeek: payload.dayOfWeek === undefined ? '' : String(payload.dayOfWeek),
+    dayOfMonth: payload.dayOfMonth || 1,
+    effectiveStartDate: newStart,
+    effectiveEndDate: payload.effectiveEndDate || '',
+    isActive: payload.isActive === undefined ? true : payload.isActive,
+    notes: payload.notes || '',
+    createdAt: payload.createdAt || now,
+    updatedAt: now
+  };
+  const existing = readObjects_(V12_SHEETS.BUDGET_INCOME).map(function(row) {
+    if (!payload.id && row.incomeName === income.incomeName && !row.effectiveEndDate && normalDateV12_(row.effectiveStartDate) < newStart) {
+      const end = new Date(newStart + 'T00:00:00');
+      end.setDate(end.getDate() - 1);
+      row.effectiveEndDate = end.toISOString().slice(0, 10);
+      row.updatedAt = now;
+    }
+    return row;
+  }).filter(function(row) { return row.id !== income.id; });
+  clearAndWriteWithHeadersV12_(V12_SHEETS.BUDGET_INCOME, V12_HEADERS.BudgetIncome, existing.concat([income]));
+  audit_('save', 'budgetIncome', income.id, '', income);
+  return { ok: true, income: income };
+}
+
+function saveBudgetPlannedExpense_(payload) {
+  ensureV12Sheets_();
+  const month = normalMonthV12_(payload.budgetMonth || today_().slice(0, 7));
+  const bucketId = normalBucketId_(payload.bucketId);
+  const now = now_();
+  const expense = {
+    id: payload.id || id_('planned_expense'),
+    budgetMonth: month,
+    bucketId: bucketId,
+    expenseName: payload.expenseName || 'Planned Expense',
+    frequency: payload.frequency || 'monthly',
+    dayOfWeek: payload.dayOfWeek === undefined ? '' : String(payload.dayOfWeek),
+    amount: money_(payload.amount),
+    monthlyCalculatedAmount: calculatePlannedExpenseMonthlyAmountV12_(payload, month),
+    autoGenerateTransaction: payload.autoGenerateTransaction === undefined ? true : payload.autoGenerateTransaction,
+    requiresManualActual: payload.requiresManualActual === true || String(payload.requiresManualActual).toLowerCase() === 'true',
+    startDate: payload.startDate || month + '-01',
+    endDate: payload.endDate || '',
+    notes: payload.notes || '',
+    createdAt: payload.createdAt || now,
+    updatedAt: now
+  };
+  const existing = readObjects_(V12_SHEETS.BUDGET_PLANNED_EXPENSES).filter(function(row) { return row.id !== expense.id; });
+  clearAndWriteWithHeadersV12_(V12_SHEETS.BUDGET_PLANNED_EXPENSES, V12_HEADERS.BudgetPlannedExpenses, existing.concat([expense]));
+  audit_('save', 'budgetPlannedExpense', expense.id, '', expense);
+  return { ok: true, expense: expense };
+}
+
+function deleteBudgetPlannedExpense_(payload) {
+  const id = payload.id;
+  if (!id) throw new Error('Planned expense id is required.');
+  const kept = readObjects_(V12_SHEETS.BUDGET_PLANNED_EXPENSES).filter(function(row) { return row.id !== id; });
+  clearAndWriteWithHeadersV12_(V12_SHEETS.BUDGET_PLANNED_EXPENSES, V12_HEADERS.BudgetPlannedExpenses, kept);
+  audit_('delete', 'budgetPlannedExpense', id, '', '');
+  return { ok: true, deletedId: id };
+}
+
+function generatePlannedTransactions_(payload) {
+  const month = normalMonthV12_(payload.budgetMonth || today_().slice(0, 7));
+  ensureV12Sheets_();
+  const expenses = readPlannedExpensesForMonthV12_(month).filter(function(expense) {
+    return normalBoolV12_(expense.autoGenerateTransaction) && !normalBoolV12_(expense.requiresManualActual);
+  });
+  const existingGenerated = readObjects_(V12_SHEETS.BUDGET_GENERATED_TRANSACTIONS);
+  const generatedThisMonth = existingGenerated.filter(function(row) { return normalMonthV12_(row.budgetMonth) === month; });
+  const generated = [];
+  const transactions = [];
+  expenses.forEach(function(expense) {
+    const already = generatedThisMonth.some(function(row) { return row.sourceExpenseId === expense.id; });
+    if (already) return;
+    const amount = calculatePlannedExpenseMonthlyAmountV12_(expense, month);
+    if (!amount) return;
+    const transaction = createTransaction_({
+      transactionDate: month + '-01',
+      description: 'Planned allocation: ' + expense.expenseName,
+      merchant: '25 Ducats Budget',
+      amount: amount,
+      transactionType: 'allocation',
+      bucketId: expense.bucketId,
+      categoryId: 'cat_' + normalBucketId_(expense.bucketId),
+      accountId: 'acct_' + normalBucketId_(expense.bucketId),
+      sourceBucket: bucketName_(expense.bucketId),
+      notes: 'Auto-generated from planned expense ' + expense.id
+    }).transaction;
+    const generatedRow = {
+      id: id_('generated_budget_txn'),
+      sourceExpenseId: expense.id,
+      budgetMonth: month,
+      transactionDate: month + '-01',
+      bucketId: normalBucketId_(expense.bucketId),
+      amount: amount,
+      status: 'generated',
+      createdTransactionId: transaction.id,
+      notes: expense.expenseName,
+      createdAt: now_(),
+      updatedAt: now_()
+    };
+    generated.push(generatedRow);
+    transactions.push(transaction);
+  });
+  clearAndWriteWithHeadersV12_(V12_SHEETS.BUDGET_GENERATED_TRANSACTIONS, V12_HEADERS.BudgetGeneratedTransactions, existingGenerated.concat(generated));
+  return { ok: true, generatedCount: generated.length, generatedTransactions: existingGenerated.concat(generated), transactions: transactions };
+}
+
+function readPlannedExpensesForMonthV12_(month) {
+  const all = readObjects_(V12_SHEETS.BUDGET_PLANNED_EXPENSES);
+  const exact = all.filter(function(row) { return normalMonthV12_(row.budgetMonth) === month; });
+  if (exact.length) return exact;
+  const prior = all.map(function(row) { return normalMonthV12_(row.budgetMonth); }).filter(function(m) { return m && m < month; }).sort().pop();
+  return prior ? all.filter(function(row) { return normalMonthV12_(row.budgetMonth) === prior; }).map(function(row) { row.budgetMonth = month; return row; }) : [];
+}
+
+function calculatePlannedExpenseMonthlyAmountV12_(expense, month) {
+  const amount = money_(expense.amount);
+  if (expense.frequency === 'weekly') return Math.round(amount * countWeekdayInMonthV12_(month, Number(expense.dayOfWeek || 0)) * 100) / 100;
+  return Math.round(amount * 100) / 100;
+}
+
+function countWeekdayInMonthV12_(month, weekday) {
+  const start = new Date(month + '-01T00:00:00');
+  const last = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+  let count = 0;
+  for (let d = new Date(start); d <= last; d.setDate(d.getDate() + 1)) {
+    if (d.getDay() === weekday) count += 1;
+  }
+  return count;
+}
+
+function clearAndWriteWithHeadersV12_(sheetName, headers, rows) {
+  let sheet = spreadsheet_().getSheetByName(sheetName);
+  if (!sheet) sheet = spreadsheet_().insertSheet(sheetName);
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows.map(function(row) {
+      return headers.map(function(header) { return row[header] === undefined || row[header] === null ? '' : row[header]; });
+    }));
+  }
+  sheet.setFrozenRows(1);
+}
+
+function normalMonthV12_(value) {
+  if (!value) return '';
+  if (value instanceof Date && !isNaN(value.getTime())) return value.toISOString().slice(0, 7);
+  const text = String(value).trim();
+  if (/^\d{4}-\d{2}/.test(text)) return text.slice(0, 7);
+  const parsed = new Date(text);
+  return isNaN(parsed.getTime()) ? text : parsed.toISOString().slice(0, 7);
+}
+
+function normalDateV12_(value) {
+  if (!value) return '';
+  if (value instanceof Date && !isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+  const text = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const parsed = new Date(text);
+  return isNaN(parsed.getTime()) ? text : parsed.toISOString().slice(0, 10);
+}
+
+function normalBoolV12_(value) {
+  if (value === true || value === false) return value;
+  const text = String(value || '').toLowerCase().trim();
+  return text === 'true' || text === 'yes' || text === '1';
+}

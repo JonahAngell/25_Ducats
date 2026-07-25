@@ -1545,7 +1545,7 @@ function showDucatsEasterEggV8() {
     toast.className = 'ducats-toast';
     document.body.appendChild(toast);
   }
-  toast.textContent = "I hand my cousin twenty-five ducats, I'm sweating buckets. He hands me a sandwich bag with some little green nuggets.";
+  toast.textContent = "25 Ducats: plan the buckets, count the ducats, and keep the little green nuggets in order.";
   toast.classList.add('show');
   window.setTimeout(() => toast.classList.remove('show'), 4200);
 }
@@ -1663,3 +1663,784 @@ document.addEventListener('touchend', (e) => {
   }
   touchStartY = 0; // Reset
 }, { passive: true });
+// --- v12 simplified monthly budgets with supporting tables ---
+state.budgetIncome = state.budgetIncome || [];
+state.budgetPlannedExpenses = state.budgetPlannedExpenses || [];
+state.budgetGeneratedTransactions = state.budgetGeneratedTransactions || [];
+
+const BUDGET_BASIS_LABELS_V12 = {
+  gross_income: 'Gross income',
+  net_income: 'Net income',
+  after_taxes: 'After taxes',
+  after_401k: 'After 401K',
+  after_fixed_expenses: 'After fixed expenses',
+  remaining_income: 'Remaining available'
+};
+
+function applyBootstrap(data) {
+  state.transactions = normaliseArray(data.transactions).map(normaliseTransaction);
+  state.categories = normaliseArray(data.categories).map(normaliseCategory);
+  state.accounts = normaliseArray(data.accounts).map(normaliseAccount);
+  state.budgets = normaliseArray(data.budgets).map(normaliseBudgetV12);
+  state.budgetIncome = normaliseArray(data.budgetIncome || data.BudgetIncome).map(normaliseBudgetIncomeV12);
+  state.budgetPlannedExpenses = normaliseArray(data.budgetPlannedExpenses || data.BudgetPlannedExpenses).map(normalisePlannedExpenseV12);
+  state.budgetGeneratedTransactions = normaliseArray(data.budgetGeneratedTransactions || data.BudgetGeneratedTransactions).map(normaliseGeneratedTransactionV12);
+  state.bucketAliases = normaliseArray(data.bucketAliases || data.BucketAliases).map(normaliseBucketAlias);
+  state.bucketTransfers = normaliseArray(data.bucketTransfers || data.BucketTransfers).map(normaliseBucketTransfer);
+  state.bucketBalances = normaliseArray(data.bucketBalances || data.BucketBalances).map(normaliseBucketBalance);
+  state.settings = data.settings || {};
+  renderAll();
+}
+
+function getCacheShape() {
+  return {
+    transactions: state.transactions,
+    categories: state.categories,
+    accounts: state.accounts,
+    budgets: state.budgets,
+    budgetIncome: state.budgetIncome || [],
+    budgetPlannedExpenses: state.budgetPlannedExpenses || [],
+    budgetGeneratedTransactions: state.budgetGeneratedTransactions || [],
+    bucketAliases: state.bucketAliases,
+    bucketTransfers: state.bucketTransfers,
+    bucketBalances: state.bucketBalances,
+    settings: state.settings
+  };
+}
+
+function summariseLoadedData() {
+  return {
+    transactions: state.transactions.length,
+    categories: state.categories.length,
+    accounts: state.accounts.length,
+    budgets: state.budgets.length,
+    budgetIncome: (state.budgetIncome || []).length,
+    budgetPlannedExpenses: (state.budgetPlannedExpenses || []).length,
+    budgetGeneratedTransactions: (state.budgetGeneratedTransactions || []).length,
+    bucketAliases: state.bucketAliases.length,
+    bucketTransfers: state.bucketTransfers.length,
+    bucketBalances: state.bucketBalances.length
+  };
+}
+
+function normaliseBudgetV12(budget) {
+  const bucketId = budget.bucketId || budget.bucketID || budget.BucketId || budget.BucketID || bucketIdFromAny(budget.categoryId || budget.categoryID || '');
+  return {
+    ...budget,
+    id: budget.id || '',
+    budgetMonth: normaliseMonthValue(budget.budgetMonth),
+    bucketId: bucketIdFromAny(bucketId),
+    categoryId: budget.categoryId || budget.categoryID || (bucketId ? `cat_${bucketIdFromAny(bucketId)}` : ''),
+    allocationType: budget.allocationType || budget.type || 'fixed',
+    allocationValue: parseMoneyValue(budget.allocationValue !== undefined ? budget.allocationValue : budget.plannedAmount),
+    allocationBasis: budget.allocationBasis || 'net_income',
+    plannedAmount: parseMoneyValue(budget.plannedAmount),
+    notes: budget.notes || ''
+  };
+}
+
+function normaliseBudgetIncomeV12(row) {
+  return {
+    ...row,
+    id: row.id || '',
+    incomeName: row.incomeName || row.name || 'Income',
+    amount: parseMoneyValue(row.amount),
+    amountBasis: row.amountBasis || 'net',
+    frequency: row.frequency || 'weekly',
+    dayOfWeek: row.dayOfWeek === '' || row.dayOfWeek === undefined ? '' : String(row.dayOfWeek),
+    dayOfMonth: Number(row.dayOfMonth || 1),
+    effectiveStartDate: normaliseDateValue(row.effectiveStartDate || row.effectiveStart || todayIsoV12()),
+    effectiveEndDate: normaliseDateValue(row.effectiveEndDate || ''),
+    isActive: normaliseBoolean(row.isActive),
+    notes: row.notes || ''
+  };
+}
+
+function normalisePlannedExpenseV12(row) {
+  return {
+    ...row,
+    id: row.id || '',
+    budgetMonth: normaliseMonthValue(row.budgetMonth),
+    bucketId: bucketIdFromAny(row.bucketId || row.bucketID || ''),
+    expenseName: row.expenseName || row.name || '',
+    frequency: row.frequency || 'monthly',
+    dayOfWeek: row.dayOfWeek === '' || row.dayOfWeek === undefined ? '' : String(row.dayOfWeek),
+    amount: parseMoneyValue(row.amount),
+    monthlyCalculatedAmount: parseMoneyValue(row.monthlyCalculatedAmount),
+    autoGenerateTransaction: normaliseBoolean(row.autoGenerateTransaction),
+    requiresManualActual: String(row.requiresManualActual || '').toLowerCase() === 'true' || row.requiresManualActual === true,
+    startDate: normaliseDateValue(row.startDate || ''),
+    endDate: normaliseDateValue(row.endDate || ''),
+    notes: row.notes || ''
+  };
+}
+
+function normaliseGeneratedTransactionV12(row) {
+  return {
+    ...row,
+    id: row.id || '',
+    sourceExpenseId: row.sourceExpenseId || '',
+    budgetMonth: normaliseMonthValue(row.budgetMonth),
+    transactionDate: normaliseDateValue(row.transactionDate),
+    bucketId: bucketIdFromAny(row.bucketId || ''),
+    amount: parseMoneyValue(row.amount),
+    status: row.status || '',
+    createdTransactionId: row.createdTransactionId || ''
+  };
+}
+
+function renderBudgetsTable() {
+  renderSimpleBudgetsV12();
+}
+
+function renderSimpleBudgetsV12() {
+  const list = $('#budgetBucketsList');
+  if (!list) return;
+  const month = getSelectedBudgetMonthV12();
+  const forecast = calculateIncomeForecastV12(month);
+  const budgetRows = getBudgetRowsForMonthV12(month);
+  const bucketCards = activeBucketAccounts().map((account) => buildBudgetBucketCardV12(account, month, budgetRows, forecast));
+  const totalPlanned = sum(bucketCards.map((row) => row.plannedAmount));
+  const totalActual = sum(bucketCards.map((row) => row.actualAmount));
+  const remaining = forecast.net - totalPlanned;
+  setTextV12('#budgetForecastGross', formatCurrency(forecast.gross));
+  setTextV12('#budgetForecastNet', formatCurrency(forecast.net));
+  setTextV12('#budgetTotalPlanned', formatCurrency(totalPlanned));
+  setTextV12('#budgetRemainingIncome', formatCurrency(remaining));
+  renderIncomeSummaryV12(month, forecast);
+  renderBudgetAlertV12(forecast, totalPlanned, bucketCards);
+  list.innerHTML = bucketCards.map((card) => budgetBucketCardHtmlV12(card)).join('') || `<div class="empty-state">No active buckets were found.</div>`;
+  wireBudgetCardsV12();
+}
+
+function getSelectedBudgetMonthV12() {
+  const select = $('#budgetMonthFilter');
+  return (select && select.value) || getMostRecentMonth() || currentYearMonth();
+}
+
+function renderFilters() {
+  const months = unique(state.transactions.map((t) => transactionMonth(t.transactionDate)).filter(Boolean)).sort().reverse();
+  safeFillSelect($('#monthFilter'), [{ value: '', label: 'All months' }, ...months.map((m) => ({ value: m, label: m }))]);
+  const budgetMonths = unique([
+    ...state.budgets.map((b) => normaliseMonthValue(b.budgetMonth)),
+    ...(state.budgetPlannedExpenses || []).map((e) => normaliseMonthValue(e.budgetMonth)),
+    ...months,
+    currentYearMonth()
+  ].filter(Boolean)).sort().reverse();
+  safeFillSelect($('#budgetMonthFilter'), budgetMonths.map((m) => ({ value: m, label: m })));
+  const bucketMonthFilter = $('#bucketMonthFilter');
+  if (bucketMonthFilter) safeFillSelect(bucketMonthFilter, budgetMonths.map((m) => ({ value: m, label: m })));
+  safeFillSelect($('#categoryFilter'), [{ value: '', label: 'All categories' }, ...state.categories.map((c) => ({ value: c.id, label: c.name || c.id }))]);
+}
+
+function getBudgetRowsForMonthV12(month) {
+  const exact = state.budgets.filter((b) => normaliseMonthValue(b.budgetMonth) === month);
+  if (exact.length) return exact;
+  const prior = unique(state.budgets.map((b) => normaliseMonthValue(b.budgetMonth)).filter((m) => m && m < month)).sort().pop();
+  if (!prior) return [];
+  return state.budgets.filter((b) => normaliseMonthValue(b.budgetMonth) === prior).map((b) => ({ ...b, id: '', budgetMonth: month }));
+}
+
+function getPlannedExpensesForMonthV12(month, bucketId) {
+  const exact = (state.budgetPlannedExpenses || []).filter((e) => normaliseMonthValue(e.budgetMonth) === month && (!bucketId || e.bucketId === bucketId));
+  if (exact.length) return exact;
+  const prior = unique((state.budgetPlannedExpenses || []).map((e) => normaliseMonthValue(e.budgetMonth)).filter((m) => m && m < month)).sort().pop();
+  return prior ? state.budgetPlannedExpenses.filter((e) => normaliseMonthValue(e.budgetMonth) === prior && (!bucketId || e.bucketId === bucketId)).map((e) => ({ ...e, budgetMonth: month, id: '' })) : [];
+}
+
+function buildBudgetBucketCardV12(account, month, budgetRows, forecast) {
+  const bucketId = effectiveBucketId(account.bucketId || account.id || account.name);
+  const row = budgetRows.find((budget) => effectiveBucketId(budget.bucketId || budget.categoryId) === bucketId) || { bucketId, allocationType: 'fixed', allocationValue: 0, allocationBasis: 'net_income', plannedAmount: 0 };
+  const plannedAmount = calculateBudgetPlannedAmountV12(row, forecast, budgetRows);
+  const expenses = getPlannedExpensesForMonthV12(month, bucketId).map((expense) => ({ ...expense, monthlyCalculatedAmount: calculatePlannedExpenseMonthlyAmountV12(expense, month) }));
+  const expenseTotal = sum(expenses.map((expense) => expense.monthlyCalculatedAmount));
+  const actualAmount = calculateActualForBucketV12(bucketId, month);
+  return {
+    account,
+    bucketId,
+    bucketName: account.name || bucketNameById(bucketId),
+    allocationType: row.allocationType || 'fixed',
+    allocationValue: Number(row.allocationValue || row.plannedAmount || 0),
+    allocationBasis: row.allocationBasis || 'net_income',
+    plannedAmount,
+    expenses,
+    expenseTotal,
+    actualAmount,
+    remainingAmount: plannedAmount - actualAmount,
+    overExpenseAmount: Math.max(0, expenseTotal - plannedAmount),
+    notes: row.notes || ''
+  };
+}
+
+function calculateBudgetPlannedAmountV12(row, forecast, allBudgetRows) {
+  const value = Number(row.allocationValue || row.plannedAmount || 0);
+  if ((row.allocationType || 'fixed') !== 'percentage') return roundCurrencyV12(value);
+  return roundCurrencyV12(getBasisAmountV12(row.allocationBasis || 'net_income', forecast, allBudgetRows) * (value / 100));
+}
+
+function getBasisAmountV12(basis, forecast, budgetRows) {
+  const gross = forecast.gross || 0;
+  const net = forecast.net || 0;
+  if (basis === 'gross_income') return gross;
+  if (basis === 'after_taxes') return net || gross;
+  if (basis === 'after_401k') return net || gross;
+  if (basis === 'after_fixed_expenses') {
+    const fixed = sum((budgetRows || []).filter((b) => ['rent', 'car', 'taxes', '401k', 'tithing'].includes(effectiveBucketId(b.bucketId || b.categoryId))).map((b) => Number(b.plannedAmount || b.allocationValue || 0)));
+    return Math.max(0, net - fixed);
+  }
+  if (basis === 'remaining_income') return Math.max(0, net - sum((budgetRows || []).map((b) => Number(b.plannedAmount || 0))));
+  return net || gross;
+}
+
+function calculateActualForBucketV12(bucketId, month) {
+  return state.transactions
+    .filter((txn) => transactionMonth(txn.transactionDate) === month && effectiveBucketId(txn.bucketId || txn.accountId) === bucketId && Number(txn.amount) < 0)
+    .reduce((total, txn) => total + Math.abs(Number(txn.amount || 0)), 0);
+}
+
+function calculatePlannedExpenseMonthlyAmountV12(expense, month) {
+  const amount = Number(expense.amount || 0);
+  if (expense.frequency === 'weekly') return roundCurrencyV12(amount * countWeekdayInMonthV12(month, Number(expense.dayOfWeek || 0)));
+  return roundCurrencyV12(amount);
+}
+
+function calculateIncomeForecastV12(month) {
+  const schedules = (state.budgetIncome || []).filter((row) => row.isActive !== false && isIncomeScheduleRelevantV12(row, month));
+  let gross = 0;
+  let net = 0;
+  schedules.forEach((schedule) => {
+    const amount = calculateIncomeForScheduleV12(schedule, month);
+    if (schedule.amountBasis === 'gross') gross += amount;
+    else net += amount;
+  });
+  if (!gross && net) gross = net;
+  if (!net && gross) net = gross;
+  return { gross: roundCurrencyV12(gross), net: roundCurrencyV12(net), schedules };
+}
+
+function isIncomeScheduleRelevantV12(schedule, month) {
+  const monthStart = new Date(`${month}-01T00:00:00`);
+  const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+  const start = schedule.effectiveStartDate ? new Date(`${schedule.effectiveStartDate}T00:00:00`) : monthStart;
+  const end = schedule.effectiveEndDate ? new Date(`${schedule.effectiveEndDate}T00:00:00`) : null;
+  return start <= monthEnd && (!end || end >= monthStart);
+}
+
+function calculateIncomeForScheduleV12(schedule, month) {
+  const amount = Number(schedule.amount || 0);
+  if (schedule.frequency === 'monthly') return amount;
+  if (schedule.frequency === 'weekly') return amount * countWeekdayInMonthV12(month, Number(schedule.dayOfWeek || 0), schedule.effectiveStartDate, schedule.effectiveEndDate);
+  if (schedule.frequency === 'biweekly') return amount * countBiweeklyDatesInMonthV12(month, schedule.effectiveStartDate || `${month}-01`);
+  return amount;
+}
+
+function countWeekdayInMonthV12(month, weekday, startDate, endDate) {
+  const start = new Date(`${month}-01T00:00:00`);
+  const last = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+  const min = startDate ? new Date(`${startDate}T00:00:00`) : start;
+  const max = endDate ? new Date(`${endDate}T00:00:00`) : last;
+  let count = 0;
+  for (let d = new Date(start); d <= last; d.setDate(d.getDate() + 1)) {
+    if (d >= min && d <= max && d.getDay() === weekday) count += 1;
+  }
+  return count;
+}
+
+function countBiweeklyDatesInMonthV12(month, anchorDateText) {
+  const start = new Date(`${month}-01T00:00:00`);
+  const last = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+  let anchor = new Date(`${anchorDateText}T00:00:00`);
+  while (anchor > start) anchor.setDate(anchor.getDate() - 14);
+  let count = 0;
+  for (let d = new Date(anchor); d <= last; d.setDate(d.getDate() + 14)) {
+    if (d >= start && d <= last) count += 1;
+  }
+  return count;
+}
+
+function renderIncomeSummaryV12(month, forecast) {
+  const container = $('#budgetIncomeSummary');
+  if (!container) return;
+  const schedules = forecast.schedules || [];
+  container.innerHTML = schedules.length ? schedules.map((s) => `<div class="budget-income-pill"><span>${escapeHtml(s.incomeName)}</span><strong>${formatCurrency(calculateIncomeForScheduleV12(s, month))}</strong><small>${escapeHtml(titleCase(s.frequency))} • ${escapeHtml(s.amountBasis)}</small></div>`).join('') : `<div class="empty-state">No income schedule saved yet. Add income to forecast available money.</div>`;
+}
+
+function renderBudgetAlertV12(forecast, totalPlanned, bucketCards) {
+  const alert = $('#budgetAlert');
+  if (!alert) return;
+  const overIncome = totalPlanned - forecast.net;
+  const overBuckets = bucketCards.filter((card) => card.overExpenseAmount > 0);
+  if (overIncome > 0 || overBuckets.length) {
+    const bucketText = overBuckets.length ? ` ${overBuckets.length} bucket(s) also have planned expenses above their bucket budget.` : '';
+    alert.hidden = false;
+    alert.className = 'budget-alert';
+    alert.textContent = overIncome > 0 ? `You have budgeted ${formatCurrency(totalPlanned)} against ${formatCurrency(forecast.net)} available. You are over budget by ${formatCurrency(overIncome)}.${bucketText}` : bucketText.trim();
+  } else {
+    alert.hidden = true;
+  }
+}
+
+function budgetBucketCardHtmlV12(card) {
+  const pct = card.plannedAmount ? Math.min(100, Math.round((card.actualAmount / card.plannedAmount) * 100)) : 0;
+  const overClass = card.overExpenseAmount > 0 ? 'over' : '';
+  const expenseRows = card.expenses.length ? card.expenses.map((expense) => plannedExpenseHtmlV12(expense, card.bucketId)).join('') : `<div class="empty-state">No planned expenses for this bucket.</div>`;
+  return `<section class="budget-bucket-card ${overClass}" data-budget-bucket-id="${escapeHtml(card.bucketId)}">
+    <div class="budget-bucket-head"><div><h4>${escapeHtml(card.bucketName)}</h4><small>${escapeHtml(card.bucketId)}</small></div>${card.overExpenseAmount > 0 ? `<span class="budget-chip danger">Expenses over by ${formatCurrency(card.overExpenseAmount)}</span>` : `<span class="budget-chip">On plan</span>`}</div>
+    <div class="budget-bucket-edit">
+      <label>Type<select class="budget-allocation-type"><option value="fixed" ${card.allocationType === 'fixed' ? 'selected' : ''}>Fixed $</option><option value="percentage" ${card.allocationType === 'percentage' ? 'selected' : ''}>Percentage %</option></select></label>
+      <label>Budget Value<input class="budget-allocation-value" type="number" step="0.01" min="0" value="${Number(card.allocationValue || 0)}" /></label>
+      <label>Percentage Basis<select class="budget-allocation-basis">${Object.entries(BUDGET_BASIS_LABELS_V12).map(([value,label]) => `<option value="${value}" ${card.allocationBasis === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+    </div>
+    <div class="budget-bucket-metrics"><div class="budget-bucket-metric"><span>Planned</span><strong>${formatCurrency(card.plannedAmount)}</strong></div><div class="budget-bucket-metric"><span>Actual</span><strong>${formatCurrency(card.actualAmount)}</strong></div><div class="budget-bucket-metric"><span>Remaining</span><strong class="${card.remainingAmount < 0 ? 'amount-negative' : 'amount-positive'}">${formatCurrency(card.remainingAmount)}</strong></div></div>
+    <div class="budget-progress-row"><div class="budget-progress-label"><span>Used</span><strong>${pct}%</strong></div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(2,pct)}%"></div></div></div>
+    <div class="budget-section-heading"><div><strong>Planned expenses</strong><p class="card-subtitle">Monthly total: ${formatCurrency(card.expenseTotal)}</p></div><button class="secondary-button add-planned-expense-button" data-bucket-id="${escapeHtml(card.bucketId)}" type="button">Add Expense</button></div>
+    <div class="planned-expense-list">${expenseRows}</div>
+  </section>`;
+}
+
+function plannedExpenseHtmlV12(expense, bucketId) {
+  const frequency = expense.frequency === 'weekly' ? `Weekly ${weekdayNameV12(expense.dayOfWeek)}` : titleCase(expense.frequency || 'monthly');
+  const flags = `${expense.autoGenerateTransaction ? 'Auto allocation' : 'No auto allocation'}${expense.requiresManualActual ? ' • Manual actual' : ''}`;
+  return `<div class="planned-expense-row" data-expense-id="${escapeHtml(expense.id)}"><div><strong>${escapeHtml(expense.expenseName)}</strong><small>${escapeHtml(frequency)} • ${formatCurrency(expense.amount)} • Month ${formatCurrency(expense.monthlyCalculatedAmount)}</small><small>${escapeHtml(flags)}</small></div><button class="text-button edit-planned-expense-button" type="button" data-expense-id="${escapeHtml(expense.id)}" data-bucket-id="${escapeHtml(bucketId)}">Edit</button></div>`;
+}
+
+function wireBudgetCardsV12() {
+  $$('.budget-allocation-type, .budget-allocation-value, .budget-allocation-basis').forEach((input) => input.addEventListener('input', debounceV12(saveBudgetPlan, 650)));
+  $$('.add-planned-expense-button').forEach((button) => button.addEventListener('click', () => openPlannedExpenseDialogV12(button.dataset.bucketId)));
+  $$('.edit-planned-expense-button').forEach((button) => button.addEventListener('click', () => openPlannedExpenseDialogV12(button.dataset.bucketId, button.dataset.expenseId)));
+}
+
+function readBucketBudgetsFromDomV12() {
+  const month = getSelectedBudgetMonthV12();
+  return $$('.budget-bucket-card[data-budget-bucket-id]').map((card) => {
+    const bucketId = card.dataset.budgetBucketId;
+    const allocationType = card.querySelector('.budget-allocation-type').value;
+    const allocationValue = parseMoneyValue(card.querySelector('.budget-allocation-value').value);
+    const allocationBasis = card.querySelector('.budget-allocation-basis').value;
+    const forecast = calculateIncomeForecastV12(month);
+    const plannedAmount = allocationType === 'percentage' ? roundCurrencyV12(getBasisAmountV12(allocationBasis, forecast, []) * allocationValue / 100) : allocationValue;
+    return { budgetMonth: month, bucketId, categoryId: `cat_${bucketId}`, allocationType, allocationValue, allocationBasis, plannedAmount, notes: '' };
+  });
+}
+
+async function saveBudgetPlan() {
+  try {
+    const month = getSelectedBudgetMonthV12();
+    const rows = readBucketBudgetsFromDomV12();
+    const result = await callPost('saveSimplifiedBudgetPlan', { budgetMonth: month, rows });
+    if (Array.isArray(result.budgets)) state.budgets = state.budgets.filter((row) => normaliseMonthValue(row.budgetMonth) !== month).concat(result.budgets.map(normaliseBudgetV12));
+    localStorage.setItem(STORAGE_KEYS.cache, JSON.stringify(getCacheShape()));
+    renderAll();
+    showToast('Budget saved.');
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function openIncomeDialogV12() {
+  const dialog = $('#incomeDialog');
+  const first = (state.budgetIncome || [])[0];
+  $('#incomeNameInput').value = first ? first.incomeName : 'Primary Pay';
+  $('#incomeAmountInput').value = first ? Number(first.amount || 0) : '';
+  $('#incomeBasisInput').value = first ? first.amountBasis : 'net';
+  $('#incomeFrequencyInput').value = first ? first.frequency : 'weekly';
+  $('#incomeDayOfWeekInput').value = first && first.dayOfWeek !== '' ? first.dayOfWeek : '5';
+  $('#incomeDayOfMonthInput').value = first ? Number(first.dayOfMonth || 1) : 1;
+  $('#incomeEffectiveStartInput').value = first ? first.effectiveStartDate : todayIsoV12();
+  $('#incomeNotesInput').value = first ? first.notes : '';
+  dialog.showModal();
+}
+
+async function submitIncomeV12(event) {
+  event.preventDefault();
+  try {
+    const payload = {
+      incomeName: $('#incomeNameInput').value.trim(),
+      amount: parseMoneyValue($('#incomeAmountInput').value),
+      amountBasis: $('#incomeBasisInput').value,
+      frequency: $('#incomeFrequencyInput').value,
+      dayOfWeek: $('#incomeDayOfWeekInput').value,
+      dayOfMonth: $('#incomeDayOfMonthInput').value,
+      effectiveStartDate: $('#incomeEffectiveStartInput').value,
+      notes: $('#incomeNotesInput').value.trim()
+    };
+    const result = await callPost('saveBudgetIncome', payload);
+    state.budgetIncome = (state.budgetIncome || []).filter((row) => row.id !== result.income.id).concat([normaliseBudgetIncomeV12(result.income)]);
+    localStorage.setItem(STORAGE_KEYS.cache, JSON.stringify(getCacheShape()));
+    $('#incomeDialog').close();
+    renderAll();
+    showToast('Income schedule saved.');
+  } catch (error) { showToast(error.message); }
+}
+
+function openPlannedExpenseDialogV12(bucketId, expenseId) {
+  const expense = (state.budgetPlannedExpenses || []).find((row) => row.id === expenseId);
+  $('#plannedExpenseIdInput').value = expense ? expense.id : '';
+  $('#plannedExpenseNameInput').value = expense ? expense.expenseName : '';
+  populatePlannedExpenseBucketSelectV12(bucketId || (expense && expense.bucketId));
+  $('#plannedExpenseFrequencyInput').value = expense ? expense.frequency : 'monthly';
+  $('#plannedExpenseDayOfWeekInput').value = expense ? expense.dayOfWeek : '';
+  $('#plannedExpenseAmountInput').value = expense ? Number(expense.amount || 0) : '';
+  $('#plannedExpenseStartDateInput').value = expense ? expense.startDate : `${getSelectedBudgetMonthV12()}-01`;
+  $('#plannedExpenseAutoGenerateInput').checked = expense ? expense.autoGenerateTransaction : true;
+  $('#plannedExpenseManualActualInput').checked = expense ? expense.requiresManualActual : false;
+  $('#plannedExpenseNotesInput').value = expense ? expense.notes : '';
+  $('#plannedExpenseDialog').showModal();
+}
+
+function populatePlannedExpenseBucketSelectV12(selectedBucketId) {
+  const options = activeBucketAccounts().map((account) => ({ value: effectiveBucketId(account.bucketId || account.id || account.name), label: account.name || bucketNameById(account.bucketId || account.id) }));
+  safeFillSelect($('#plannedExpenseBucketInput'), options);
+  if (selectedBucketId) $('#plannedExpenseBucketInput').value = selectedBucketId;
+}
+
+async function submitPlannedExpenseV12(event) {
+  event.preventDefault();
+  try {
+    const month = getSelectedBudgetMonthV12();
+    const payload = {
+      id: $('#plannedExpenseIdInput').value,
+      budgetMonth: month,
+      expenseName: $('#plannedExpenseNameInput').value.trim(),
+      bucketId: $('#plannedExpenseBucketInput').value,
+      frequency: $('#plannedExpenseFrequencyInput').value,
+      dayOfWeek: $('#plannedExpenseDayOfWeekInput').value,
+      amount: parseMoneyValue($('#plannedExpenseAmountInput').value),
+      startDate: $('#plannedExpenseStartDateInput').value,
+      autoGenerateTransaction: $('#plannedExpenseAutoGenerateInput').checked,
+      requiresManualActual: $('#plannedExpenseManualActualInput').checked,
+      notes: $('#plannedExpenseNotesInput').value.trim()
+    };
+    const result = await callPost('saveBudgetPlannedExpense', payload);
+    state.budgetPlannedExpenses = (state.budgetPlannedExpenses || []).filter((row) => row.id !== result.expense.id).concat([normalisePlannedExpenseV12(result.expense)]);
+    localStorage.setItem(STORAGE_KEYS.cache, JSON.stringify(getCacheShape()));
+    $('#plannedExpenseDialog').close();
+    renderAll();
+    showToast('Planned expense saved.');
+  } catch (error) { showToast(error.message); }
+}
+
+async function generatePlannedTransactionsV12() {
+  try {
+    const month = getSelectedBudgetMonthV12();
+    const result = await callPost('generatePlannedTransactions', { budgetMonth: month });
+    if (Array.isArray(result.generatedTransactions)) state.budgetGeneratedTransactions = result.generatedTransactions.map(normaliseGeneratedTransactionV12);
+    if (Array.isArray(result.transactions)) state.transactions = state.transactions.concat(result.transactions.map(normaliseTransaction));
+    localStorage.setItem(STORAGE_KEYS.cache, JSON.stringify(getCacheShape()));
+    renderAll();
+    showToast(`Generated ${result.generatedCount || 0} planned allocation transaction(s).`);
+  } catch (error) { showToast(error.message); }
+}
+
+function copyPreviousBudgetV7() {
+  const month = getSelectedBudgetMonthV12();
+  const priorBudgetMonth = unique(state.budgets.map((b) => normaliseMonthValue(b.budgetMonth)).filter((m) => m && m < month)).sort().pop();
+  if (!priorBudgetMonth) return showToast('No previous budget month found.');
+  const copied = state.budgets.filter((b) => normaliseMonthValue(b.budgetMonth) === priorBudgetMonth).map((b) => ({ ...b, id: '', budgetMonth: month }));
+  state.budgets = state.budgets.filter((b) => normaliseMonthValue(b.budgetMonth) !== month).concat(copied);
+  const priorExpenseMonth = unique((state.budgetPlannedExpenses || []).map((e) => normaliseMonthValue(e.budgetMonth)).filter((m) => m && m < month)).sort().pop();
+  if (priorExpenseMonth) {
+    const copiedExpenses = state.budgetPlannedExpenses.filter((e) => normaliseMonthValue(e.budgetMonth) === priorExpenseMonth).map((e) => ({ ...e, id: '', budgetMonth: month }));
+    state.budgetPlannedExpenses = state.budgetPlannedExpenses.filter((e) => normaliseMonthValue(e.budgetMonth) !== month).concat(copiedExpenses);
+  }
+  renderAll();
+  showToast('Previous month copied locally. Save Budget to persist.');
+}
+
+function weekdayNameV12(value) {
+  return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][Number(value)] || '';
+}
+
+function roundCurrencyV12(value) { return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100; }
+function todayIsoV12() { return new Date().toISOString().slice(0, 10); }
+function setTextV12(selector, text) { const node = $(selector); if (node) node.textContent = text; }
+function debounceV12(fn, ms) { let timer; return (...args) => { window.clearTimeout(timer); timer = window.setTimeout(() => fn(...args), ms); }; }
+
+function showDucatsEasterEggV8() {
+  let toast = $('#ducatsToast');
+  if (!toast) { toast = document.createElement('div'); toast.id = 'ducatsToast'; toast.className = 'ducats-toast'; document.body.appendChild(toast); }
+  toast.textContent = '25 Ducats: plan the buckets, count the ducats, and keep the little green nuggets in order.';
+  toast.classList.add('show');
+  window.setTimeout(() => toast.classList.remove('show'), 4200);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const addIncome = $('#addIncomeScheduleButton');
+  if (addIncome) addIncome.addEventListener('click', openIncomeDialogV12);
+  const closeIncome = $('#closeIncomeDialogButton');
+  if (closeIncome) closeIncome.addEventListener('click', () => $('#incomeDialog').close());
+  const cancelIncome = $('#cancelIncomeButton');
+  if (cancelIncome) cancelIncome.addEventListener('click', () => $('#incomeDialog').close());
+  const incomeForm = $('#incomeForm');
+  if (incomeForm) incomeForm.addEventListener('submit', submitIncomeV12);
+  const closeExpense = $('#closePlannedExpenseDialogButton');
+  if (closeExpense) closeExpense.addEventListener('click', () => $('#plannedExpenseDialog').close());
+  const cancelExpense = $('#cancelPlannedExpenseButton');
+  if (cancelExpense) cancelExpense.addEventListener('click', () => $('#plannedExpenseDialog').close());
+  const expenseForm = $('#plannedExpenseForm');
+  if (expenseForm) expenseForm.addEventListener('submit', submitPlannedExpenseV12);
+  const generateButton = $('#generatePlannedTransactionsButton');
+  if (generateButton) generateButton.addEventListener('click', generatePlannedTransactionsV12);
+});
+
+// --- v13 budget ordering, local draft backup, and deferred Google Sheets sync ---
+const BUDGET_DRAFT_KEY_V13 = 'budgetApp.budgetDraftV13';
+const BUDGET_LAYOUT_KEY_V13 = 'budgetApp.budgetLayoutV13';
+const BUDGET_GROUPS_V13 = [
+  { id: 'gross', title: '1. Gross', description: 'Total forecast pay before deductions.' },
+  { id: 'take_home', title: '2. Take-Home', description: 'Taxes and 401K before take-home pay.' },
+  { id: 'fixed_expenses', title: '3. Fixed Expenses', description: 'Rent, tithing, car payment, and car insurance.' },
+  { id: 'savings', title: '4. Savings', description: 'Career, savings, and stocks.' },
+  { id: 'necessities', title: '5. Necessities', description: 'Food and variable car necessities such as charging.' },
+  { id: 'other', title: '6. Other', description: 'Fun spending and other expenses.' }
+];
+const DEFAULT_BUCKET_GROUPS_V13 = {
+  taxes: 'take_home',
+  '401k': 'take_home',
+  rent: 'fixed_expenses',
+  tithing: 'fixed_expenses',
+  car: 'fixed_expenses',
+  career: 'savings',
+  savings: 'savings',
+  stocks: 'savings',
+  food: 'necessities',
+  fun: 'other',
+  other_expenses: 'other'
+};
+const DEFAULT_EXPENSE_GROUPS_V13 = {
+  car_payment: 'fixed_expenses',
+  car_insurance: 'fixed_expenses',
+  car_charging: 'necessities',
+  rent: 'fixed_expenses',
+  tithing: 'fixed_expenses',
+  food: 'necessities',
+  fun: 'other',
+  other_spending: 'other'
+};
+state.budgetDraftDirty = false;
+
+function renderSimpleBudgetsV12() {
+  applyBudgetDraftIfCurrentMonthV13();
+  const list = $('#budgetBucketsList');
+  if (!list) return;
+  const month = getSelectedBudgetMonthV12();
+  const forecast = calculateIncomeForecastV12(month);
+  const budgetRows = getBudgetRowsForMonthV12(month);
+  const bucketCards = activeBucketAccounts().map((account) => buildBudgetBucketCardV12(account, month, budgetRows, forecast));
+  const grouped = groupBudgetCardsV13(bucketCards, month);
+  const totalPlanned = sum(bucketCards.map((row) => row.plannedAmount));
+  const remaining = forecast.net - totalPlanned;
+  setTextV12('#budgetForecastGross', formatCurrency(forecast.gross));
+  setTextV12('#budgetForecastNet', formatCurrency(forecast.net));
+  setTextV12('#budgetTotalPlanned', formatCurrency(totalPlanned));
+  setTextV12('#budgetRemainingIncome', formatCurrency(remaining));
+  renderIncomeSummaryV12(month, forecast);
+  renderBudgetAlertV12(forecast, totalPlanned, bucketCards);
+  list.innerHTML = BUDGET_GROUPS_V13.map((group) => budgetGroupSectionHtmlV13(group, grouped[group.id] || [], forecast)).join('');
+  renderDraftIndicatorV13();
+  wireBudgetCardsV12();
+}
+
+function groupBudgetCardsV13(bucketCards, month) {
+  const grouped = Object.fromEntries(BUDGET_GROUPS_V13.map((group) => [group.id, []]));
+  bucketCards.forEach((card) => {
+    const groupId = getBucketGroupV13(card.bucketId);
+    (grouped[groupId] || grouped.other).push(card);
+  });
+  Object.values(grouped).forEach((cards) => cards.sort(compareBudgetCardsV13));
+  return grouped;
+}
+
+function compareBudgetCardsV13(a, b) {
+  const order = ['taxes','401k','rent','tithing','car','career','savings','stocks','food','fun','other_expenses'];
+  return (order.indexOf(a.bucketId) === -1 ? 999 : order.indexOf(a.bucketId)) - (order.indexOf(b.bucketId) === -1 ? 999 : order.indexOf(b.bucketId)) || a.bucketName.localeCompare(b.bucketName);
+}
+
+function budgetGroupSectionHtmlV13(group, cards, forecast) {
+  if (group.id === 'gross') {
+    return `<section class="budget-group-section"><div class="budget-group-heading"><div><h4>${escapeHtml(group.title)}</h4><p>${escapeHtml(group.description)}</p></div><span class="budget-group-total">${formatCurrency(forecast.gross)}</span></div>${grossCardHtmlV13(forecast)}</section>`;
+  }
+  const groupTotal = sum(cards.map((card) => card.plannedAmount));
+  const cardsHtml = cards.length ? cards.map((card) => budgetBucketCardHtmlV13(card, group.id)).join('') : `<div class="empty-state">No items assigned to this category.</div>`;
+  return `<section class="budget-group-section" data-budget-group="${escapeHtml(group.id)}"><div class="budget-group-heading"><div><h4>${escapeHtml(group.title)}</h4><p>${escapeHtml(group.description)}</p></div><span class="budget-group-total">${formatCurrency(groupTotal)}</span></div>${cardsHtml}</section>`;
+}
+
+function grossCardHtmlV13(forecast) {
+  const rows = (forecast.schedules || []).map((schedule) => `<div class="planned-expense-row"><div><strong>${escapeHtml(schedule.incomeName)}</strong><small>${escapeHtml(titleCase(schedule.frequency))} ${schedule.dayOfWeek !== '' ? 'on ' + weekdayNameV12(schedule.dayOfWeek) : ''} - ${escapeHtml(schedule.amountBasis)}</small></div><strong>${formatCurrency(calculateIncomeForScheduleV12(schedule, getSelectedBudgetMonthV12()))}</strong></div>`).join('');
+  return `<section class="budget-bucket-card budget-group-gross"><div class="budget-bucket-head"><div><h4>Total Pay</h4><small>Forecast income for this month</small></div><span class="budget-mode-pill budget-mode-fixed">Income</span></div><div class="budget-bucket-metrics"><div class="budget-bucket-metric"><span>Gross</span><strong>${formatCurrency(forecast.gross)}</strong></div><div class="budget-bucket-metric"><span>Net</span><strong>${formatCurrency(forecast.net)}</strong></div><div class="budget-bucket-metric"><span>Schedules</span><strong>${(forecast.schedules || []).length}</strong></div></div><div class="planned-expense-list">${rows || '<div class="empty-state">Add income to forecast available money.</div>'}</div></section>`;
+}
+
+function budgetBucketCardHtmlV13(card, groupId) {
+  const pct = card.plannedAmount ? Math.min(100, Math.round((card.actualAmount / card.plannedAmount) * 100)) : 0;
+  const overClass = card.overExpenseAmount > 0 ? 'over' : '';
+  const modeClass = card.allocationType === 'percentage' ? 'budget-mode-percentage' : 'budget-mode-fixed';
+  const modeText = card.allocationType === 'percentage' ? `${Number(card.allocationValue || 0)}% of ${BUDGET_BASIS_LABELS_V12[card.allocationBasis] || card.allocationBasis}` : `Fixed ${formatCurrency(card.allocationValue || 0)}`;
+  const expenseRows = card.expenses.length ? card.expenses.map((expense) => plannedExpenseHtmlV13(expense, card.bucketId)).join('') : `<div class="empty-state">No planned expenses for this bucket.</div>`;
+  const editModeClass = card.allocationType === 'percentage' ? 'percentage-mode' : 'fixed-mode';
+  return `<section class="budget-bucket-card budget-group-${escapeHtml(groupId)} ${overClass}" data-budget-bucket-id="${escapeHtml(card.bucketId)}">
+    <div class="budget-bucket-head"><div><h4>${escapeHtml(card.bucketName)}</h4><small>${escapeHtml(groupTitleV13(groupId))}</small></div><span class="budget-mode-pill ${modeClass}">${escapeHtml(modeText)}</span></div>
+    <div class="budget-bucket-edit ${editModeClass}">
+      <label>Spending type<select class="budget-allocation-type"><option value="fixed" ${card.allocationType === 'fixed' ? 'selected' : ''}>Fixed dollar amount</option><option value="percentage" ${card.allocationType === 'percentage' ? 'selected' : ''}>Percentage based</option></select></label>
+      <label class="budget-allocation-value-wrap">Budget value<input class="budget-allocation-value" type="number" step="0.01" min="0" value="${Number(card.allocationValue || 0)}" /></label>
+      <label class="budget-allocation-basis-wrap">Percentage basis<select class="budget-allocation-basis">${Object.entries(BUDGET_BASIS_LABELS_V12).map(([value,label]) => `<option value="${value}" ${card.allocationBasis === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+    </div>
+    <div class="budget-bucket-metrics"><div class="budget-bucket-metric"><span>Planned</span><strong>${formatCurrency(card.plannedAmount)}</strong></div><div class="budget-bucket-metric"><span>Actual</span><strong>${formatCurrency(card.actualAmount)}</strong></div><div class="budget-bucket-metric"><span>Remaining</span><strong class="${card.remainingAmount < 0 ? 'amount-negative' : 'amount-positive'}">${formatCurrency(card.remainingAmount)}</strong></div></div>
+    <div class="budget-progress-row"><div class="budget-progress-label"><span>Used</span><strong>${pct}%</strong></div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(2,pct)}%"></div></div></div>
+    <div class="budget-section-heading"><div><strong>Planned expenses</strong><p class="card-subtitle">Monthly total: ${formatCurrency(card.expenseTotal)}${card.bucketId === 'car' ? ' - includes fixed and variable car items.' : ''}</p></div><button class="secondary-button add-planned-expense-button" data-bucket-id="${escapeHtml(card.bucketId)}" type="button">Add Expense</button></div>
+    <div class="planned-expense-list">${expenseRows}</div>
+  </section>`;
+}
+
+function plannedExpenseHtmlV13(expense, bucketId) {
+  const frequency = expense.frequency === 'weekly' ? `Weekly ${weekdayNameV12(expense.dayOfWeek)}` : titleCase(expense.frequency || 'monthly');
+  const flags = `${expense.autoGenerateTransaction ? 'Auto allocation' : 'No auto allocation'}${expense.requiresManualActual ? ' - Manual actual' : ''}`;
+  const groupId = getExpenseGroupV13(expense);
+  return `<div class="planned-expense-row" data-expense-id="${escapeHtml(expense.id)}"><div><strong>${escapeHtml(expense.expenseName)}</strong><small>${escapeHtml(frequency)} - ${formatCurrency(expense.amount)} - Month ${formatCurrency(expense.monthlyCalculatedAmount)}</small><small>${escapeHtml(flags)}</small><span class="expense-group-tag">${escapeHtml(groupTitleV13(groupId))}</span></div><button class="text-button edit-planned-expense-button" type="button" data-expense-id="${escapeHtml(expense.id)}" data-bucket-id="${escapeHtml(bucketId)}">Edit</button></div>`;
+}
+
+function getBudgetLayoutV13() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(BUDGET_LAYOUT_KEY_V13) || '{}');
+    return { bucketGroups: { ...DEFAULT_BUCKET_GROUPS_V13, ...(parsed.bucketGroups || {}) }, expenseGroups: { ...DEFAULT_EXPENSE_GROUPS_V13, ...(parsed.expenseGroups || {}) } };
+  } catch {
+    return { bucketGroups: { ...DEFAULT_BUCKET_GROUPS_V13 }, expenseGroups: { ...DEFAULT_EXPENSE_GROUPS_V13 } };
+  }
+}
+function saveBudgetLayoutV13(layout) { localStorage.setItem(BUDGET_LAYOUT_KEY_V13, JSON.stringify(layout)); }
+function getBucketGroupV13(bucketId) { return normaliseGroupV13(getBudgetLayoutV13().bucketGroups[bucketId] || DEFAULT_BUCKET_GROUPS_V13[bucketId] || 'other'); }
+function getExpenseGroupV13(expense) { const key = budgetItemKeyV13(expense.expenseName || ''); return normaliseGroupV13(getBudgetLayoutV13().expenseGroups[key] || DEFAULT_EXPENSE_GROUPS_V13[key] || DEFAULT_BUCKET_GROUPS_V13[expense.bucketId] || 'other'); }
+function normaliseGroupV13(value) { return BUDGET_GROUPS_V13.some((group) => group.id === value) ? value : 'other'; }
+function groupTitleV13(groupId) { return (BUDGET_GROUPS_V13.find((group) => group.id === groupId) || BUDGET_GROUPS_V13[BUDGET_GROUPS_V13.length - 1]).title.replace(/^\d+\.\s*/, ''); }
+function budgetItemKeyV13(value) { return slugify(value || '').replace(/^acct_/, '').replace(/^cat_/, ''); }
+
+function wireBudgetCardsV12() {
+  $$('.budget-allocation-type, .budget-allocation-value, .budget-allocation-basis').forEach((input) => {
+    input.addEventListener('input', recordBudgetDraftV13);
+    input.addEventListener('change', () => { applyBudgetDraftToStateV13(); renderSimpleBudgetsV12(); });
+  });
+  $$('.add-planned-expense-button').forEach((button) => button.addEventListener('click', () => openPlannedExpenseDialogV12(button.dataset.bucketId)));
+  $$('.edit-planned-expense-button').forEach((button) => button.addEventListener('click', () => openPlannedExpenseDialogV12(button.dataset.bucketId, button.dataset.expenseId)));
+}
+
+function recordBudgetDraftV13() {
+  const month = getSelectedBudgetMonthV12();
+  const rows = readBucketBudgetsFromDomV12();
+  localStorage.setItem(BUDGET_DRAFT_KEY_V13, JSON.stringify({ month, rows, savedAt: new Date().toISOString() }));
+  state.budgetDraftDirty = true;
+  renderDraftIndicatorV13();
+}
+function applyBudgetDraftToStateV13() {
+  const month = getSelectedBudgetMonthV12();
+  const rows = readBucketBudgetsFromDomV12();
+  state.budgets = state.budgets.filter((row) => normaliseMonthValue(row.budgetMonth) !== month).concat(rows.map(normaliseBudgetV12));
+  localStorage.setItem(STORAGE_KEYS.cache, JSON.stringify(getCacheShape()));
+}
+function applyBudgetDraftIfCurrentMonthV13() {
+  try {
+    const draft = JSON.parse(localStorage.getItem(BUDGET_DRAFT_KEY_V13) || '{}');
+    if (!draft.month || !Array.isArray(draft.rows)) return;
+    const current = getSelectedBudgetMonthV12();
+    if (draft.month !== current) return;
+    const hasDraft = draft.rows.length > 0;
+    if (hasDraft) state.budgets = state.budgets.filter((row) => normaliseMonthValue(row.budgetMonth) !== current).concat(draft.rows.map(normaliseBudgetV12));
+  } catch {}
+}
+function renderDraftIndicatorV13() {
+  const heading = $('#budgetsView .card-heading .filter-row');
+  if (!heading) return;
+  let note = $('#budgetDraftNote');
+  if (!note) {
+    note = document.createElement('span');
+    note.id = 'budgetDraftNote';
+    note.className = 'budget-draft-note';
+    heading.prepend(note);
+  }
+  note.hidden = !state.budgetDraftDirty;
+  note.textContent = 'Local draft saved';
+}
+
+async function saveBudgetPlan() {
+  try {
+    applyBudgetDraftToStateV13();
+    const month = getSelectedBudgetMonthV12();
+    const rows = readBucketBudgetsFromDomV12();
+    const result = await callPost('saveSimplifiedBudgetPlan', { budgetMonth: month, rows });
+    if (Array.isArray(result.budgets)) state.budgets = state.budgets.filter((row) => normaliseMonthValue(row.budgetMonth) !== month).concat(result.budgets.map(normaliseBudgetV12));
+    state.budgetDraftDirty = false;
+    localStorage.removeItem(BUDGET_DRAFT_KEY_V13);
+    localStorage.setItem(STORAGE_KEYS.cache, JSON.stringify(getCacheShape()));
+    renderAll();
+    showToast('Budget saved to Google Sheets.');
+  } catch (error) { showToast(error.message); }
+}
+
+async function switchView(view) {
+  const leavingBudget = state.activeView === 'budgets' && view !== 'budgets';
+  if (leavingBudget && state.budgetDraftDirty) await saveBudgetPlan();
+  state.activeView = view;
+  $$('.view').forEach((section) => section.classList.remove('active'));
+  const target = $(`#${view}View`) || $('#dashboardView');
+  target.classList.add('active');
+  $$('.nav-item').forEach((button) => button.classList.toggle('active', button.dataset.view === view));
+  const titles = { dashboard: 'Dashboard', buckets: 'Buckets', transfers: 'Transfers', admin: 'Bucket Admin', transactions: 'Transactions', budgets: 'Budgets', settings: 'Settings' };
+  if (elements.viewTitle) elements.viewTitle.textContent = titles[view] || titleCase(view);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function openBudgetLayoutDialogV13() {
+  renderBudgetLayoutEditorV13();
+  $('#budgetLayoutDialog').showModal();
+}
+function renderBudgetLayoutEditorV13() {
+  const container = $('#budgetLayoutEditor');
+  if (!container) return;
+  const layout = getBudgetLayoutV13();
+  const month = getSelectedBudgetMonthV12();
+  const rows = [];
+  activeBucketAccounts().forEach((account) => {
+    const bucketId = effectiveBucketId(account.bucketId || account.id || account.name);
+    rows.push(layoutRowHtmlV13('bucket', bucketId, account.name || bucketNameById(bucketId), 'Bucket', layout.bucketGroups[bucketId] || getBucketGroupV13(bucketId)));
+    getPlannedExpensesForMonthV12(month, bucketId).forEach((expense) => {
+      const key = budgetItemKeyV13(expense.expenseName);
+      rows.push(layoutRowHtmlV13('expense', key, expense.expenseName, `Planned expense in ${account.name || bucketId}`, layout.expenseGroups[key] || getExpenseGroupV13(expense)));
+    });
+  });
+  container.innerHTML = rows.join('') || '<div class="empty-state">No budget items are available to organise yet.</div>';
+}
+function layoutRowHtmlV13(type, key, label, subtitle, selectedGroup) {
+  return `<div class="budget-layout-row ${type === 'expense' ? 'expense' : ''}" data-layout-type="${escapeHtml(type)}" data-layout-key="${escapeHtml(key)}"><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(subtitle)}</small></div><select class="budget-layout-select">${BUDGET_GROUPS_V13.map((group) => `<option value="${group.id}" ${selectedGroup === group.id ? 'selected' : ''}>${group.title}</option>`).join('')}</select></div>`;
+}
+function applyBudgetLayoutV13(event) {
+  event.preventDefault();
+  const layout = { bucketGroups: {}, expenseGroups: {} };
+  $$('#budgetLayoutEditor .budget-layout-row').forEach((row) => {
+    const type = row.dataset.layoutType;
+    const key = row.dataset.layoutKey;
+    const value = row.querySelector('.budget-layout-select').value;
+    if (type === 'bucket') layout.bucketGroups[key] = value;
+    if (type === 'expense') layout.expenseGroups[key] = value;
+  });
+  saveBudgetLayoutV13(layout);
+  $('#budgetLayoutDialog').close();
+  renderSimpleBudgetsV12();
+  showToast('Budget layout updated.');
+}
+function resetBudgetLayoutV13() {
+  localStorage.removeItem(BUDGET_LAYOUT_KEY_V13);
+  renderBudgetLayoutEditorV13();
+  renderSimpleBudgetsV12();
+  showToast('Budget layout reset.');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const layoutButton = $('#openBudgetLayoutButton');
+  if (layoutButton) layoutButton.addEventListener('click', openBudgetLayoutDialogV13);
+  const layoutForm = $('#budgetLayoutForm');
+  if (layoutForm) layoutForm.addEventListener('submit', applyBudgetLayoutV13);
+  const closeLayout = $('#closeBudgetLayoutDialogButton');
+  if (closeLayout) closeLayout.addEventListener('click', () => $('#budgetLayoutDialog').close());
+  const cancelLayout = $('#cancelBudgetLayoutButton');
+  if (cancelLayout) cancelLayout.addEventListener('click', () => $('#budgetLayoutDialog').close());
+  const resetLayout = $('#resetBudgetLayoutButton');
+  if (resetLayout) resetLayout.addEventListener('click', resetBudgetLayoutV13);
+});
