@@ -62,6 +62,8 @@ function wireEvents() {
   const bucketMonthFilter = $('#bucketMonthFilter');
   if (bucketMonthFilter) bucketMonthFilter.addEventListener('change', renderBucketView);
 
+  $('#fabAddTransaction').addEventListener('click', openTransactionDialog);
+
   $('#openAddTransactionButton').addEventListener('click', openTransactionDialog);
   $('#closeDialogButton').addEventListener('click', closeTransactionDialog);
   $('#cancelTransactionButton').addEventListener('click', closeTransactionDialog);
@@ -1641,3 +1643,23 @@ function setTextV9(selector, text) {
   const node = $(selector);
   if (node) node.textContent = text;
 }
+
+// Add native-feeling Pull-to-Refresh
+let touchStartY = 0;
+
+document.addEventListener('touchstart', (e) => {
+  if (window.scrollY <= 0) {
+    touchStartY = e.touches[0].clientY;
+  }
+}, { passive: true });
+
+document.addEventListener('touchend', (e) => {
+  if (window.scrollY <= 0 && touchStartY > 0) {
+    const touchEndY = e.changedTouches[0].clientY;
+    // If the user pulled down more than 110 pixels from the top, trigger a refresh
+    if (touchEndY - touchStartY > 110) {
+      loadBootstrapData();
+    }
+  }
+  touchStartY = 0; // Reset
+}, { passive: true });
